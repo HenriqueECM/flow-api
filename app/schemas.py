@@ -75,9 +75,14 @@ class ProventoOut(BaseModel):
     created_at: datetime
 
 
-# ── Posição consolidada (calculada) ──────────────────────────────────────────
-class Posicao(BaseModel):
+# ── Posição consolidada (calculada + cotação atual) ──────────────────────────
+class PosicaoOut(BaseModel):
     ticker: str
+    nome: str
     quantidade: Decimal
-    preco_medio: Decimal
-    custo_total: Decimal
+    pm_historico: Decimal
+    # Cotação (brapi.dev). None quando não há cotação disponível para o ticker.
+    preco_atual: Decimal | None = None
+    variacao_percent: float | None = None
+    valor_total: Decimal | None = None
+    lucro: Decimal | None = None
