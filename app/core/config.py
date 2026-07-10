@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
     dev_create_tables: bool = False
 
+    # Cotações da B3 via brapi.dev (opcional — sem token, as cotações ficam
+    # indisponíveis, mas a aplicação continua no ar).
+    brapi_token: str | None = None
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
