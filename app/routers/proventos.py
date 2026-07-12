@@ -1,13 +1,32 @@
+from datetime import date
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.deps import get_owned_carteira
-from app.models import Carteira, Provento
-from app.schemas import ProventoCreate, ProventoOut
+from app.models import Carteira, Provento, Transacao
+from app.schemas import ProventoCreate, ProventoOut, ProventoPreviewOut
+from app.services.proventos_engine import calcular_campos_provento
 
 router = APIRouter(prefix="/carteiras/{carteira_id}/proventos", tags=["proventos"])
+
+
+async def _transacoes_do_ticker(
+    db: AsyncSession, carteira_id, ticker: str
+) -> list[Transacao]:
+    """Transações do ticker na carteira, em ordem cronológica."""
+    result = await db.execute(
+        select(Transacao)
+        .where(
+            Transacao.carteira_id == carteira_id,
+            func.upper(Transacao.ticker) == ticker.upper(),
+        )
+        .order_by(Transacao.data, Transacao.created_at)
+    )
+    return list(result.scalars().all())
 
 
 @router.get("", response_model=list[ProventoOut])
@@ -23,13 +42,61 @@ async def list_proventos(
     return list(result.scalars().all())
 
 
+@router.get("/preview", response_model=ProventoPreviewOut)
+async def preview_provento(
+    carteira: Carteira = Depends(get_owned_carteira),
+    db: AsyncSession = Depends(get_db),
+    ticker: str | None = None,
+    data_com: date | None = None,
+    valor_por_acao: Decimal | None = None,
+) -> ProventoPreviewOut:
+    """Calcula os campos do provento em tempo real, sem persistir.
+
+    Chamado enquanto o usuário digita — parâmetros incompletos (sem ticker ou
+    sem Data COM) retornam tudo nulo, não erro. Sem `valor_por_acao`, ainda
+    devolve quantidade/PM na data; valor recebido e YoC ficam nulos.
+    """
+    if not ticker or data_com is None:
+        return ProventoPreviewOut()
+
+    transacoes = await _transacoes_do_ticker(db, carteira.id, ticker)
+    calc = calcular_campos_provento(
+        transacoes, data_com, valor_por_acao if valor_por_acao is not None else Decimal(0)
+    )
+
+    tem_valor = valor_por_acao is not None
+    return ProventoPreviewOut(
+        quantidade=calc.quantidade,
+        pm_historico=calc.pm_historico,
+        valor_recebido=calc.valor_recebido if tem_valor else None,
+        yoc_evento=calc.yoc_evento if tem_valor else None,
+    )
+
+
 @router.post("", response_model=ProventoOut, status_code=status.HTTP_201_CREATED)
 async def create_provento(
     payload: ProventoCreate,
     carteira: Carteira = Depends(get_owned_carteira),
     db: AsyncSession = Depends(get_db),
 ) -> Provento:
-    provento = Provento(carteira_id=carteira.id, **payload.model_dump())
+    # Posição (quantidade e PM) vigente na Data COM, a partir das transações.
+    transacoes = await _transacoes_do_ticker(db, carteira.id, payload.ticker)
+    calc = calcular_campos_provento(
+        transacoes, payload.data_com, payload.valor_por_acao
+    )
+
+    provento = Provento(
+        carteira_id=carteira.id,
+        ticker=payload.ticker,
+        tipo_provento=payload.tipo_provento,
+        data_com=payload.data_com,
+        data_pagamento=payload.data_pagamento,
+        valor_por_acao=payload.valor_por_acao,
+        quantidade=calc.quantidade,
+        pm_historico=calc.pm_historico,
+        valor_recebido=calc.valor_recebido,
+        yoc_evento=calc.yoc_evento,
+    )
     db.add(provento)
     await db.commit()
     await db.refresh(provento)

@@ -73,7 +73,12 @@ class Provento(Base):
     data_com: Mapped[date | None] = mapped_column(Date)
     data_pagamento: Mapped[date | None] = mapped_column(Date)
     valor_por_acao: Mapped[Decimal] = mapped_column(Numeric(20, 6))
+    # Campos calculados na Data COM via motor de posição (podem ser nulos se
+    # não havia posição/PM sincronizado na data).
     quantidade: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    pm_historico: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    valor_recebido: Mapped[Decimal | None] = mapped_column(Numeric(20, 2))
+    yoc_evento: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

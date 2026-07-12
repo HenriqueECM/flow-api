@@ -36,7 +36,11 @@ create table if not exists public.proventos (
   data_com       date,
   data_pagamento date,
   valor_por_acao numeric(20, 6) not null,
+  -- Calculados na Data COM via motor de posição (podem ser nulos).
   quantidade     numeric(20, 8),
+  pm_historico   numeric(20, 4),
+  valor_recebido numeric(20, 2),
+  yoc_evento     numeric(20, 4),
   created_at     timestamptz not null default now()
 );
 create index if not exists proventos_carteira_id_idx on public.proventos (carteira_id);

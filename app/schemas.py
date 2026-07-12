@@ -58,7 +58,6 @@ class ProventoCreate(BaseModel):
     data_com: date | None = None
     data_pagamento: date | None = None
     valor_por_acao: Decimal = Field(ge=0)
-    quantidade: Decimal | None = None
 
 
 class ProventoOut(BaseModel):
@@ -71,8 +70,21 @@ class ProventoOut(BaseModel):
     data_com: date | None
     data_pagamento: date | None
     valor_por_acao: Decimal
+    # Calculados na Data COM (nulos se não havia posição/PM na data).
     quantidade: Decimal | None
+    pm_historico: Decimal | None
+    valor_recebido: Decimal | None
+    yoc_evento: Decimal | None
     created_at: datetime
+
+
+class ProventoPreviewOut(BaseModel):
+    """Preview dos campos calculados (read-only, sem persistir)."""
+
+    quantidade: Decimal | None = None
+    pm_historico: Decimal | None = None
+    valor_recebido: Decimal | None = None
+    yoc_evento: Decimal | None = None
 
 
 # ── Posição consolidada (calculada + cotação atual) ──────────────────────────
