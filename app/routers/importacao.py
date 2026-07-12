@@ -1,0 +1,113 @@
+from collections import defaultdict
+from datetime import date
+from decimal import Decimal
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
+from pydantic import ValidationError
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.db import get_db
+from app.deps import get_owned_carteira
+from app.models import Carteira, Transacao
+from app.schemas import (
+    ImportAtivosPreviewOut,
+    ImportConfirmIn,
+    ImportConfirmResultOut,
+    ImportFalha,
+    ReviewRow,
+    TransacaoCreate,
+)
+from app.services.import_movimentacao import (
+    parse_movimentacao_ativos,
+    validar_posicao_lote,
+)
+
+router = APIRouter(prefix="/carteiras/{carteira_id}/import", tags=["import"])
+
+
+@router.post("/ativos/preview", response_model=ImportAtivosPreviewOut)
+async def preview_import_ativos(
+    carteira: Carteira = Depends(get_owned_carteira),
+    file: UploadFile = File(...),
+) -> ImportAtivosPreviewOut:
+    """Recebe a planilha de Movimentação (.xlsx) e devolve as linhas
+    classificadas (valido/erro/ignorado) + resumo — sem persistir nada."""
+    conteudo = await file.read()
+    try:
+        rows, summary = await run_in_threadpool(parse_movimentacao_ativos, conteudo)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        )
+    return ImportAtivosPreviewOut(rows=rows, summary=summary)
+
+
+def _row_para_transacao(row: ReviewRow) -> TransacaoCreate:
+    """Mapeia uma ReviewRow confirmada para o payload de criação de transação
+    (mesmas validações do endpoint manual)."""
+    if not row.data:
+        raise ValueError("Linha sem data válida.")
+    operacao = "compra" if row.tipo.strip().lower().startswith("compra") else "venda"
+    return TransacaoCreate(
+        ticker=row.ativo,
+        operacao=operacao,
+        quantidade=Decimal(str(row.qtde)) if row.qtde is not None else Decimal(0),
+        preco_unit=Decimal(str(row.preco_medio)),
+        outros_custos=Decimal(0),
+        data=date.fromisoformat(row.data),
+        fonte="Importação B3",
+    )
+
+
+@router.post("/ativos/confirm", response_model=ImportConfirmResultOut)
+async def confirm_import_ativos(
+    payload: ImportConfirmIn,
+    carteira: Carteira = Depends(get_owned_carteira),
+    db: AsyncSession = Depends(get_db),
+) -> ImportConfirmResultOut:
+    """Persiste as linhas confirmadas pelo frontend como transações.
+
+    Valida posição também aqui: uma venda que exceda o disponível (transações
+    já no banco + linhas anteriores do mesmo lote, em ordem) falha só naquela
+    linha, sem impedir as demais. Retorna quantas foram criadas e as falhas."""
+    falhas: list[ImportFalha] = []
+
+    # Mapeia cada linha para o payload de transação (validações do manual).
+    # Linhas com erro de validação nem entram na checagem de posição.
+    mapeadas: list[tuple[ReviewRow, TransacaoCreate]] = []
+    for row in payload.rows:
+        try:
+            create = _row_para_transacao(row)
+        except (ValidationError, ValueError) as exc:
+            falhas.append(ImportFalha(ativo=row.ativo, motivo=str(exc)))
+            continue
+        mapeadas.append((row, create))
+
+    # Posição líquida inicial por ticker (transações já existentes no banco).
+    result = await db.execute(
+        select(Transacao).where(Transacao.carteira_id == carteira.id)
+    )
+    posicao: dict[str, Decimal] = defaultdict(lambda: Decimal(0))
+    for tx in result.scalars().all():
+        sinal = Decimal(1) if tx.operacao == "compra" else Decimal(-1)
+        posicao[tx.ticker.upper()] += sinal * tx.quantidade
+
+    # Valida o lote em ordem contra a posição disponível.
+    itens = [(c.ticker.upper(), c.operacao, c.quantidade) for _, c in mapeadas]
+    motivos = validar_posicao_lote(posicao, itens)
+
+    novas: list[Transacao] = []
+    for (row, create), motivo in zip(mapeadas, motivos):
+        if motivo is not None:
+            falhas.append(ImportFalha(ativo=row.ativo, motivo=motivo))
+            continue
+        novas.append(Transacao(carteira_id=carteira.id, **create.model_dump()))
+
+    for transacao in novas:
+        db.add(transacao)
+    if novas:
+        await db.commit()
+
+    return ImportConfirmResultOut(criadas=len(novas), falhas=falhas)

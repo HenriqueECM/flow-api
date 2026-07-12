@@ -6,6 +6,11 @@ sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
 pyjwt[crypto]==2.10.1
 httpx==0.28.1
+python-multipart==0.0.32
+
+# Import de planilhas (Movimentação B3)
+pandas==3.0.3
+openpyxl==3.1.5
 
 # Testes
 pytest==9.1.1

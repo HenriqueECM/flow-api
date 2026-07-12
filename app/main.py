@@ -5,7 +5,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.db import Base, engine
-from app.routers import carteiras, health, posicoes, proventos, transacoes
+from app.routers import (
+    carteiras,
+    health,
+    importacao,
+    posicoes,
+    proventos,
+    transacoes,
+)
 
 
 @asynccontextmanager
@@ -33,3 +40,4 @@ app.include_router(carteiras.router)
 app.include_router(transacoes.router)
 app.include_router(proventos.router)
 app.include_router(posicoes.router)
+app.include_router(importacao.router)

@@ -4,8 +4,10 @@ from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 Operacao = Literal["compra", "venda"]
+ReviewStatus = Literal["valido", "alerta", "erro", "ignorado"]
 
 
 # ── Carteiras ────────────────────────────────────────────────────────────────
@@ -98,3 +100,50 @@ class PosicaoOut(BaseModel):
     variacao_percent: float | None = None
     valor_total: Decimal | None = None
     lucro: Decimal | None = None
+
+
+# ── Import de planilha (Movimentação B3) ─────────────────────────────────────
+# Espelha o contrato ReviewRow do frontend (chaves camelCase). Campos numéricos
+# como float p/ casar com o tipo `number` do front (precisão volta a Decimal na
+# confirmação/persistência).
+class ReviewRow(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    status: ReviewStatus
+    ativo: str
+    qtde: float | None = None
+    motivo: str | None = None
+    preco_medio: float = 0.0
+    valor_total: float = 0.0
+    peso: str | None = "—"
+    tipo: str = ""
+    data: str | None = None
+    valor: float = 0.0
+    data_com: str | None = None
+
+
+class ReviewSummary(BaseModel):
+    total: int
+    validas: int
+    alertas: int
+    erros: int
+    ignoradas: int
+
+
+class ImportAtivosPreviewOut(BaseModel):
+    rows: list[ReviewRow]
+    summary: ReviewSummary
+
+
+class ImportConfirmIn(BaseModel):
+    rows: list[ReviewRow]
+
+
+class ImportFalha(BaseModel):
+    ativo: str
+    motivo: str
+
+
+class ImportConfirmResultOut(BaseModel):
+    criadas: int
+    falhas: list[ImportFalha]
