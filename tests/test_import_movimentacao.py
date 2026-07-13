@@ -35,7 +35,7 @@ def _df(linhas):
 
 def test_validas_e_ignoradas():
     df = _df([
-        _linha("Debito", "05/01/2024", "Transferência - Liquidação", "PETR4 - PETROBRAS PN", 100, 30.0, 3000.0),
+        _linha("Credito", "05/01/2024", "Transferência - Liquidação", "PETR4 - PETROBRAS PN", 100, 30.0, 3000.0),
         _linha("Credito", "10/01/2024", "Dividendo", "PETR4 - PETROBRAS PN", 100, 0.5, 50.0),
     ])
 
@@ -60,8 +60,8 @@ def test_validas_e_ignoradas():
 
 def test_venda_maior_que_posicao_vira_erro():
     df = _df([
-        _linha("Debito", "05/01/2024", "Transferência - Liquidação", "VALE3 - VALE ON", 100, 60.0, 6000.0),
-        _linha("Credito", "06/01/2024", "Transferência - Liquidação", "VALE3 - VALE ON", 150, 65.0, 9750.0),
+        _linha("Credito", "05/01/2024", "Transferência - Liquidação", "VALE3 - VALE ON", 100, 60.0, 6000.0),
+        _linha("Debito", "06/01/2024", "Transferência - Liquidação", "VALE3 - VALE ON", 150, 65.0, 9750.0),
     ])
 
     rows, summary = parse_dataframe(df)
@@ -77,8 +77,8 @@ def test_reversao_ordem_cronologica():
     # Arquivo em ordem decrescente (B3): venda (mais recente) antes da compra.
     # Sem reversão, a venda seria processada primeiro e viraria erro.
     df = _df([
-        _linha("Credito", "10/02/2024", "Transferência - Liquidação", "ITUB4 - ITAU PN", 50, 32.0, 1600.0),
-        _linha("Debito", "05/01/2024", "Transferência - Liquidação", "ITUB4 - ITAU PN", 100, 30.0, 3000.0),
+        _linha("Debito", "10/02/2024", "Transferência - Liquidação", "ITUB4 - ITAU PN", 50, 32.0, 1600.0),
+        _linha("Credito", "05/01/2024", "Transferência - Liquidação", "ITUB4 - ITAU PN", 100, 30.0, 3000.0),
     ])
 
     rows, summary = parse_dataframe(df)
@@ -86,6 +86,24 @@ def test_reversao_ordem_cronologica():
     # Após reversão, a ordem processada é compra → venda, ambas válidas.
     assert [r.tipo for r in rows] == ["Compra", "Venda"]
     assert [r.data for r in rows] == ["2024-01-05", "2024-02-10"]
+    assert summary.validas == 2
+    assert summary.erros == 0
+
+
+def test_credito_e_compra_debito_e_venda():
+    # Credito = ação entrando na custódia = compra.
+    # Debito = ação saindo da custódia = venda.
+    df = _df([
+        _linha("Credito", "05/01/2024", "Transferência - Liquidação", "BBAS3 - BRASIL ON", 100, 20.0, 2000.0),
+        _linha("Debito", "10/01/2024", "Transferência - Liquidação", "BBAS3 - BRASIL ON", 40, 22.0, 880.0),
+    ])
+
+    rows, summary = parse_dataframe(df)
+
+    assert rows[0].tipo == "Compra"
+    assert rows[0].status == "valido"
+    assert rows[1].tipo == "Venda"
+    assert rows[1].status == "valido"
     assert summary.validas == 2
     assert summary.erros == 0
 

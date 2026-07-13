@@ -153,7 +153,7 @@ def _classificar(reg: dict, posicao: dict[str, Decimal]) -> ReviewRow:
             ),
         )
 
-    operacao = "compra" if reg["entrada_saida"] == "Debito" else "venda"
+    operacao = "compra" if reg["entrada_saida"] == "Credito" else "venda"
     tipo = "Compra" if operacao == "compra" else "Venda"
 
     if not ticker:
