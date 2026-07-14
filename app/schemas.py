@@ -139,6 +139,12 @@ class ImportConfirmIn(BaseModel):
     rows: list[ReviewRow]
 
 
+class ImportRevalidateIn(BaseModel):
+    """Lista COMPLETA de linhas (incluindo as editadas) para reclassificação."""
+
+    rows: list[ReviewRow]
+
+
 class ImportFalha(BaseModel):
     ativo: str
     motivo: str

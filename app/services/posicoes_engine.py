@@ -52,7 +52,8 @@ def calcular_posicao_em_data(
             quantidade += tx.quantidade
             custo += tx.quantidade * tx.preco_unit + tx.outros_custos
             pm_historico = custo / quantidade
-        else:  # venda — não afeta custo nem PM
+        else:  # venda — mantém o PM por ação, mas reduz o custo total
+            quantidade_antes = quantidade
             quantidade -= tx.quantidade
 
             if quantidade <= 0:
@@ -70,6 +71,13 @@ def calcular_posicao_em_data(
                 pm_historico = Decimal(0)
                 ciclo_numero += 1
                 ciclo_inicio = None
+            else:
+                # Remove do custo total o valor das ações vendidas, calculado ao
+                # PM vigente na venda: custo_novo = custo * (qtd_depois / qtd_antes).
+                # O PM por ação não muda; só o custo em R$ diminui. Sem isso, uma
+                # recompra posterior misturaria o custo residual e inflaria o PM.
+                custo = custo * (quantidade / quantidade_antes)
+                pm_historico = custo / quantidade
 
     return PosicaoCalculada(
         quantidade=quantidade,

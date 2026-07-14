@@ -76,6 +76,25 @@ def test_data_com_em_ciclo_anterior_usa_pm_daquele_ciclo():
     assert calc_ciclo2.yoc_evento == Decimal(5)  # (1 / 20) * 100
 
 
+def test_pm_apos_venda_parcial_e_recompra_nao_infla_yoc():
+    # Regressão via proventos: venda parcial reduz o custo proporcionalmente, então
+    # a recompra (sem zerar) não infla o PM — e o YoC do evento fica correto.
+    # compra 100@10 → venda 40 (custo 1000→600, PM 10) → compra 60@20 (PM 15).
+    txs = [
+        _tx("compra", 100, 10, date(2024, 1, 1)),
+        _tx("venda", 40, 12, date(2024, 2, 1)),
+        _tx("compra", 60, 20, date(2024, 3, 1)),
+    ]
+    calc = calcular_campos_provento(
+        txs, data_com=date(2024, 6, 1), valor_por_acao=Decimal("1.5")
+    )
+
+    assert calc.quantidade == Decimal(120)
+    assert calc.pm_historico == Decimal(15)  # não o ~18,33 do bug
+    assert calc.valor_recebido == Decimal(180)  # 120 * 1,50
+    assert calc.yoc_evento == Decimal(10)  # (1,50 / 15) * 100
+
+
 def test_sem_data_com_retorna_tudo_nulo():
     txs = [_tx("compra", 100, 10, date(2024, 1, 1))]
     calc = calcular_campos_provento(txs, data_com=None, valor_por_acao=Decimal("0.5"))

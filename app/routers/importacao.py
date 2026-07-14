@@ -16,11 +16,13 @@ from app.schemas import (
     ImportConfirmIn,
     ImportConfirmResultOut,
     ImportFalha,
+    ImportRevalidateIn,
     ReviewRow,
     TransacaoCreate,
 )
 from app.services.import_movimentacao import (
     parse_movimentacao_ativos,
+    revalidar_lote,
     validar_posicao_lote,
 )
 
@@ -41,6 +43,19 @@ async def preview_import_ativos(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         )
+    return ImportAtivosPreviewOut(rows=rows, summary=summary)
+
+
+@router.post("/ativos/revalidate", response_model=ImportAtivosPreviewOut)
+async def revalidate_import_ativos(
+    payload: ImportRevalidateIn,
+    carteira: Carteira = Depends(get_owned_carteira),
+) -> ImportAtivosPreviewOut:
+    """Reclassifica a lista COMPLETA de linhas (com as correções manuais do
+    usuário) sem reenviar o arquivo. Recalcula status/motivo e a posição
+    acumulada do zero, em sequência — então corrigir uma venda pode reabilitar
+    automaticamente linhas seguintes do mesmo ticker."""
+    rows, summary = revalidar_lote(payload.rows)
     return ImportAtivosPreviewOut(rows=rows, summary=summary)
 
 

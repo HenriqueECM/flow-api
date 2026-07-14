@@ -53,6 +53,25 @@ def test_compra_e_venda_parcial():
     assert p.ciclo_inicio == date(2024, 1, 1)
 
 
+def test_venda_parcial_e_recompra_nao_infla_pm():
+    # Regressão: numa venda parcial o custo acumulado deve cair proporcional-
+    # mente. Sem isso, a recompra seguinte (sem zerar a posição) misturaria o
+    # custo residual e inflaria o PM. Valores reais do WEGE3 (validados à mão).
+    txs = [
+        _tx("compra", 5, "46.814", date(2024, 1, 1)),
+        _tx("compra", 10, "47.61", date(2024, 2, 1)),
+        _tx("compra", 2, "44.72", date(2024, 3, 1)),
+        _tx("venda", 5, "50", date(2024, 4, 1)),   # PM não muda aqui
+        _tx("compra", 3, "43", date(2024, 5, 1)),
+    ]
+    p = calcular_posicao_em_data(txs, FUTURO)
+
+    assert p.quantidade == Decimal(15)
+    assert p.ciclo_numero == 1
+    # Custo real ao PM médio, sem inflar: ≈ R$ 46,23 (não algo maior).
+    assert abs(p.pm_historico - Decimal("46.23")) < Decimal("0.01")
+
+
 def test_venda_total_e_recompra_reinicia_ciclo():
     txs = [
         _tx("compra", 100, 10, date(2024, 1, 1)),
