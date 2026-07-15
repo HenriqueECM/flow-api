@@ -21,6 +21,7 @@ from app.schemas import (
     TransacaoCreate,
 )
 from app.services.import_movimentacao import (
+    detectar_duplicatas_no_banco,
     parse_movimentacao_ativos,
     revalidar_lote,
     validar_posicao_lote,
@@ -100,21 +101,49 @@ async def confirm_import_ativos(
             continue
         mapeadas.append((row, create))
 
-    # Posição líquida inicial por ticker (transações já existentes no banco).
+    # Transações já existentes no banco (base para duplicatas e posição).
     result = await db.execute(
         select(Transacao).where(Transacao.carteira_id == carteira.id)
     )
+    existentes = list(result.scalars().all())
+
+    # Duplicatas: linha idêntica a uma transação já persistida (mesmo ticker,
+    # data, quantidade, preço e operação) não é reimportada. A checagem é só
+    # contra o banco — linhas iguais dentro deste mesmo lote são legítimas.
+    itens_dup = [
+        (c.ticker, c.data, c.quantidade, c.preco_unit, c.operacao)
+        for _, c in mapeadas
+    ]
+    duplicadas = detectar_duplicatas_no_banco(existentes, itens_dup)
+    restantes: list[tuple[ReviewRow, TransacaoCreate]] = []
+    for (row, create), eh_duplicata in zip(mapeadas, duplicadas):
+        if eh_duplicata:
+            falhas.append(
+                ImportFalha(
+                    ativo=row.ativo,
+                    motivo=(
+                        "Possível duplicata — já existe uma transação idêntica "
+                        "(mesmo ticker, data, quantidade e preço) nesta carteira."
+                    ),
+                )
+            )
+            continue
+        restantes.append((row, create))
+
+    # Posição líquida inicial por ticker (transações já existentes no banco).
+    # Duplicatas ficam de fora do lote para não distorcer a posição — o seu
+    # efeito já está contabilizado nas `existentes`.
     posicao: dict[str, Decimal] = defaultdict(lambda: Decimal(0))
-    for tx in result.scalars().all():
+    for tx in existentes:
         sinal = Decimal(1) if tx.operacao == "compra" else Decimal(-1)
         posicao[tx.ticker.upper()] += sinal * tx.quantidade
 
     # Valida o lote em ordem contra a posição disponível.
-    itens = [(c.ticker.upper(), c.operacao, c.quantidade) for _, c in mapeadas]
+    itens = [(c.ticker.upper(), c.operacao, c.quantidade) for _, c in restantes]
     motivos = validar_posicao_lote(posicao, itens)
 
     novas: list[Transacao] = []
-    for (row, create), motivo in zip(mapeadas, motivos):
+    for (row, create), motivo in zip(restantes, motivos):
         if motivo is not None:
             falhas.append(ImportFalha(ativo=row.ativo, motivo=motivo))
             continue

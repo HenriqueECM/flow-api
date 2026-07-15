@@ -8,11 +8,13 @@ persiste nada — é a etapa de preview/revisão.
 import re
 from collections import Counter
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 
 import pandas as pd
 
+from app.models import Transacao
 from app.schemas import ReviewRow, ReviewSummary
 
 # "FII" como palavra isolada (não substring), case-insensitive.
@@ -398,6 +400,38 @@ def validar_posicao_lote(
             posicao[ticker] = posicao.get(ticker, Decimal(0)) + qtd
         motivos.append(None)
     return motivos
+
+
+def _chave_transacao(
+    ticker: str, data: date, quantidade: Decimal, preco_unit: Decimal, operacao: str
+) -> tuple:
+    """Identidade exata de uma transação, para detectar duplicatas.
+
+    Decimais iguais em valor (ex.: 100 e 100.00) comparam/hasham igual, então a
+    chave casa independente de zeros à direita vindos do banco vs. do lote.
+    """
+    return (ticker.strip().upper(), data, quantidade, preco_unit, operacao)
+
+
+def detectar_duplicatas_no_banco(
+    existentes: list[Transacao],
+    itens: list[tuple[str, date, Decimal, Decimal, str]],
+) -> list[bool]:
+    """Para cada item do lote, indica se já existe uma transação idêntica entre
+    `existentes` — mesmo ticker, data, quantidade, preço unitário e operação.
+
+    A comparação é feita apenas contra o que já está no banco: itens iguais
+    dentro do próprio lote NÃO se anulam entre si (duas compras idênticas no
+    mesmo dia são raras, mas legítimas — não são duplicata uma da outra).
+    """
+    chaves = {
+        _chave_transacao(tx.ticker, tx.data, tx.quantidade, tx.preco_unit, tx.operacao)
+        for tx in existentes
+    }
+    return [
+        _chave_transacao(ticker, data, quantidade, preco_unit, operacao) in chaves
+        for ticker, data, quantidade, preco_unit, operacao in itens
+    ]
 
 
 def parse_movimentacao_ativos(conteudo: bytes) -> tuple[list[ReviewRow], ReviewSummary]:
