@@ -16,11 +16,12 @@ def _ativo(ticker, quantidade, pm, nome=None):
     )
 
 
-def _prov(ticker, valor_recebido, quantidade, pm, data_pag=None, data_com=None):
-    """Provento já persistido (com os campos calculados na criação)."""
+def _prov(ticker, valor_recebido, quantidade, pm, data_pag=None, data_com=None, tipo="Dividendo"):
+    """Provento já persistido (com os campos calculados na criação). O
+    valor_recebido é o BRUTO — a retenção de IR (JCP) é aplicada no relatório."""
     return Provento(
         ticker=ticker,
-        tipo_provento="Dividendo",
+        tipo_provento=tipo,
         data_com=data_com,
         data_pagamento=data_pag,
         valor_por_acao=Decimal("0"),
@@ -122,3 +123,90 @@ def test_consolidado_pondera_por_evento_nao_media_simples():
     assert cons.yoc_total == Decimal("3.3333")  # ponderado, não 6%
     assert cons.yoc_12m == Decimal("3.3333")
     assert cons.yoc_total != Decimal("6.0000")
+
+
+# ── Retenção de IR do JCP no relatório ───────────────────────────────────────
+
+
+def test_jcp_entra_liquido_no_ativo_e_no_consolidado():
+    # JCP retém 17,5%: bruto 100 → líquido 82,50. base 100×10 = 1000 → YoC 8,25%.
+    ativos = [_ativo("TAEE11", 100, 10)]
+    proventos = {
+        "TAEE11": [
+            _prov("TAEE11", valor_recebido=100, quantidade=100, pm=10, data_pag=date(2024, 3, 1), tipo="JCP"),
+        ],
+    }
+
+    rel = calcular_relatorio_yoc(ativos, proventos, HOJE)
+    ativo = rel.ativos[0]
+
+    assert ativo.valor_recebido_total == Decimal("82.50")
+    assert ativo.yoc_total == Decimal("8.2500")
+    assert ativo.valor_recebido_12m == Decimal("82.50")
+    assert ativo.yoc_12m == Decimal("8.2500")
+    # Ano-calendário atual também líquido.
+    assert ativo.valor_recebido_ano == Decimal("82.50")
+    assert ativo.yoc_ano == Decimal("8.2500")
+    # Consolidado não diverge da listagem (que já é líquida).
+    assert rel.consolidado.valor_recebido_total == Decimal("82.50")
+    assert rel.consolidado.yoc_total == Decimal("8.2500")
+
+
+def test_consolidado_neta_apenas_jcp_nao_dividendo():
+    # A (JCP): bruto 100 → líquido 82,50. B (Dividendo, isento): 100.
+    # Consolidado: (82,50 + 100) / (1000 + 1000) × 100 = 9,125%.
+    ativos = [_ativo("AAAA3", 100, 10), _ativo("BBBB3", 100, 10)]
+    proventos = {
+        "AAAA3": [_prov("AAAA3", 100, 100, 10, data_pag=date(2024, 1, 15), tipo="JCP")],
+        "BBBB3": [_prov("BBBB3", 100, 100, 10, data_pag=date(2024, 1, 15), tipo="Dividendo")],
+    }
+
+    rel = calcular_relatorio_yoc(ativos, proventos, HOJE)
+    por_ticker = {a.ticker: a for a in rel.ativos}
+
+    assert por_ticker["AAAA3"].valor_recebido_total == Decimal("82.50")  # JCP líquido
+    assert por_ticker["BBBB3"].valor_recebido_total == Decimal("100.00")  # dividendo bruto=líquido
+
+    cons = rel.consolidado
+    assert cons.valor_recebido_total == Decimal("182.50")
+    assert cons.yoc_total == Decimal("9.1250")
+
+
+# ── Campos do ano-calendário atual ───────────────────────────────────────────
+
+
+def test_valor_recebido_ano_e_yoc_ano_do_ano_calendario():
+    # HOJE = 2024-07-01 → ano-calendário 2024.
+    ativos = [_ativo("BBAS3", 100, 10)]
+    proventos = {
+        "BBAS3": [
+            _prov("BBAS3", 40, 100, 10, data_pag=date(2024, 3, 1)),  # 2024: ano + 12m
+            _prov("BBAS3", 30, 100, 10, data_pag=date(2023, 8, 1)),  # 12m, mas ano anterior
+        ],
+    }
+
+    rel = calcular_relatorio_yoc(ativos, proventos, HOJE)
+    ativo = rel.ativos[0]
+
+    # Ano 2024: só o evento de março. 40 / 1000 → 4%.
+    assert ativo.valor_recebido_ano == Decimal("40.00")
+    assert ativo.yoc_ano == Decimal("4.0000")
+    # 12m pega os dois: 70 / 2000 → 3,5%.
+    assert ativo.valor_recebido_12m == Decimal("70.00")
+    assert ativo.yoc_12m == Decimal("3.5000")
+
+
+def test_yoc_ano_null_quando_nao_recebeu_no_ano():
+    # Único provento é de ano anterior → nada no ano-calendário atual.
+    ativos = [_ativo("EGIE3", 100, 10)]
+    proventos = {
+        "EGIE3": [_prov("EGIE3", 50, 100, 10, data_pag=date(2023, 5, 1))],
+    }
+
+    rel = calcular_relatorio_yoc(ativos, proventos, HOJE)
+    ativo = rel.ativos[0]
+
+    assert ativo.valor_recebido_ano == Decimal("0.00")
+    assert ativo.yoc_ano is None  # None (não 0) = sem recebimento no ano
+    # Ainda contribui no acumulado total.
+    assert ativo.valor_recebido_total == Decimal("50.00")

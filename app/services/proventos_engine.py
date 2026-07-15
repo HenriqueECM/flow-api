@@ -15,6 +15,11 @@ _CENTS = Decimal("0.01")
 _PM_QUANT = Decimal("0.0001")
 _YOC_QUANT = Decimal("0.0001")
 
+# JCP (Juros sobre Capital Próprio) sofre 17,5% de IRRF retido na fonte, então o
+# valor líquido recebido é 82,5% do bruto (quantidade × valor por ação). Dividendos
+# e rendimentos são isentos para PF (líquido = bruto).
+ALIQUOTA_IR_JCP = Decimal("0.175")
+
 
 @dataclass
 class ProventoCalculado:
@@ -57,3 +62,38 @@ def calcular_campos_provento(
         valor_recebido=valor_recebido,
         yoc_evento=yoc_evento,
     )
+
+
+def eh_jcp(tipo_provento: str | None) -> bool:
+    """True se o tipo indica Juros sobre Capital Próprio (match tolerante:
+    'jcp' ou 'juros sobre capital', case-insensitive)."""
+    texto = (tipo_provento or "").lower()
+    return "jcp" in texto or "juros sobre capital" in texto
+
+
+def liquidar_valor_recebido(
+    tipo_provento: str | None, valor_bruto: Decimal | None
+) -> Decimal | None:
+    """Valor líquido de IR: para JCP, retém 17,5% (líquido = bruto × 0,825). Demais
+    tipos (dividendo/rendimento) são isentos e passam inalterados. None → None."""
+    if valor_bruto is None:
+        return None
+    if eh_jcp(tipo_provento):
+        return (valor_bruto * (1 - ALIQUOTA_IR_JCP)).quantize(
+            _CENTS, rounding=ROUND_HALF_UP
+        )
+    return valor_bruto
+
+
+def liquidar_yoc(
+    tipo_provento: str | None, yoc_bruto: Decimal | None
+) -> Decimal | None:
+    """YoC líquido de IR, coerente com o valor recebido líquido: para JCP reduz
+    na mesma proporção do imposto retido (× 0,825). None → None."""
+    if yoc_bruto is None:
+        return None
+    if eh_jcp(tipo_provento):
+        return (yoc_bruto * (1 - ALIQUOTA_IR_JCP)).quantize(
+            _YOC_QUANT, rounding=ROUND_HALF_UP
+        )
+    return yoc_bruto

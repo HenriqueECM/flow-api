@@ -165,9 +165,11 @@ class YocAtivoOut(BaseModel):
     pm_historico_atual: Decimal
     valor_recebido_12m: Decimal
     valor_recebido_total: Decimal
+    valor_recebido_ano: Decimal  # ano-calendário atual
     # None (não 0) quando ainda não há provento no período — "sem dado".
     yoc_12m: Decimal | None = None
     yoc_total: Decimal | None = None
+    yoc_ano: Decimal | None = None
 
 
 class YocConsolidadoOut(BaseModel):
