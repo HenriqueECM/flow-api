@@ -153,3 +153,34 @@ class ImportFalha(BaseModel):
 class ImportConfirmResultOut(BaseModel):
     criadas: int
     falhas: list[ImportFalha]
+
+
+# ── Relatório de YoC (Yield on Cost) ─────────────────────────────────────────
+class YocAtivoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    ticker: str
+    nome: str
+    quantidade_atual: Decimal
+    pm_historico_atual: Decimal
+    valor_recebido_12m: Decimal
+    valor_recebido_total: Decimal
+    # None (não 0) quando ainda não há provento no período — "sem dado".
+    yoc_12m: Decimal | None = None
+    yoc_total: Decimal | None = None
+
+
+class YocConsolidadoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    valor_recebido_12m: Decimal
+    valor_recebido_total: Decimal
+    yoc_12m: Decimal | None = None
+    yoc_total: Decimal | None = None
+
+
+class RelatorioYocOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    ativos: list[YocAtivoOut]
+    consolidado: YocConsolidadoOut

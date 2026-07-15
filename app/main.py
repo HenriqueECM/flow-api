@@ -11,6 +11,7 @@ from app.routers import (
     importacao,
     posicoes,
     proventos,
+    relatorios,
     transacoes,
 )
 
@@ -41,3 +42,4 @@ app.include_router(transacoes.router)
 app.include_router(proventos.router)
 app.include_router(posicoes.router)
 app.include_router(importacao.router)
+app.include_router(relatorios.router)
