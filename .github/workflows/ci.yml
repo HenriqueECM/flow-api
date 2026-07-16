@@ -78,5 +78,10 @@ jobs:
           black --check .
 
       - name: Run tests with coverage
+        # O piso era 65% de uma métrica que não enxergava a camada async (ver
+        # .coveragerc). Com a medição corrigida e os módulos cobertos, a real é
+        # ~95% — 65% deixaria apagar módulos inteiros de teste em silêncio.
+        # 93% dá ~23 linhas de folga (1% ≈ 9 statements) para variação legítima
+        # sem virar um gate que falha por ruído.
         run: |
-          pytest --cov=app --cov-fail-under=65
+          pytest --cov=app --cov-fail-under=93
