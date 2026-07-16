@@ -18,7 +18,7 @@ jobs:
 
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      SUPABASE_JWS_URL: ${{ secrets.SUPABASE_JWS_URL }}
+      SUPABASE_JWKS_URL: ${{ secrets.SUPABASE_JWKS_URL }}
       SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET }}
       BRAPI_TOKEN: ${{ secrets.BRAPI_TOKEN }}
 
