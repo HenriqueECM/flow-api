@@ -4,6 +4,11 @@ pydantic==2.10.4
 pydantic-settings==2.7.1
 sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
+
+# Migrations. Fica aqui e não em requirements-dev porque `alembic upgrade head`
+# é operação de produção — quem sobe o banco precisa da ferramenta. A aplicação
+# não importa alembic em runtime.
+alembic==1.18.5
 pyjwt[crypto]==2.10.1
 httpx==0.28.1
 python-multipart==0.0.32
