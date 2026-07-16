@@ -14,10 +14,59 @@ from uuid import UUID
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.engine.url import make_url
 
-from app.core import brapi_client
-from app.core.security import CurrentUser, get_current_user
-from app.main import app
+# `app.core.config` é seguro de importar aqui: ele só lê o .env/ambiente e não
+# constrói o engine. Quem faz isso é `app.core.db`, importado logo abaixo.
+from app.core.config import settings
+
+# Únicos hosts aceitos para o banco de testes. Qualquer outro é tratado como
+# possível produção e aborta a sessão.
+HOSTS_LOCAIS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _exigir_banco_de_testes() -> None:
+    """Aborta a sessão se DATABASE_URL não apontar para um Postgres local.
+
+    O engine de `app.core.db` nasce no import do módulo, a partir de
+    `settings.database_url`, e este conftest importa `app.main` — então toda
+    execução de teste tem um engine apontando para onde a URL mandar. Um
+    override de `get_db` esquecido bastaria para um teste gravar no Supabase de
+    produção, silenciosamente e passando.
+
+    A checagem é feita contra `settings` (e não contra `os.environ`) de
+    propósito: é assim que ela enxerga a URL vinda do `.env` de
+    desenvolvimento, que é justamente o caso perigoso — no CI a URL já é a do
+    container efêmero.
+    """
+    url = make_url(settings.database_url)
+    ajuda = (
+        "Exporte uma URL local antes de rodar os testes, por exemplo:\n"
+        "  DATABASE_URL=postgresql+asyncpg://flow:flow@localhost:5432/flow_test"
+    )
+
+    if url.host not in HOSTS_LOCAIS:
+        raise pytest.UsageError(
+            f"DATABASE_URL aponta para o host '{url.host}', que não é local. "
+            f"Os testes recusam qualquer banco que possa ser produção.\n{ajuda}"
+        )
+
+    if url.drivername != "postgresql+asyncpg":
+        raise pytest.UsageError(
+            f"DATABASE_URL usa o driver '{url.drivername}'; a aplicação exige "
+            f"'postgresql+asyncpg'.\n{ajuda}"
+        )
+
+
+# Roda ANTES dos imports abaixo, e é por isso que eles carregam o `noqa: E402`:
+# importar `app.main` constrói o engine, e um driver inválido estoura ali com um
+# ModuleNotFoundError obscuro (ex.: 'psycopg2') antes de esta guarda ter chance
+# de explicar o problema. A ordem aqui é intencional — não reordene.
+_exigir_banco_de_testes()
+
+from app.core import brapi_client  # noqa: E402
+from app.core.security import CurrentUser, get_current_user  # noqa: E402
+from app.main import app  # noqa: E402
 
 # Dono das carteiras nos testes. Fixo (não aleatório) para que uma falha seja
 # reproduzível e para permitir comparar o user_id gravado no banco.
