@@ -1,0 +1,12 @@
+-r requirements.txt
+
+# Testa se a máquina funciona.
+pytest==9.1.1
+
+# Um linter é uma ferramenta que analisa seu código sem executá-lo para encontrar problemas.
+# Existe um import que nunca é usado?
+# Existe uma variável criada e nunca utilizada?
+# Os imports estão organizados?
+# Existe código morto?
+# Existe algum erro comum de Python?
+ruff==0.15.21

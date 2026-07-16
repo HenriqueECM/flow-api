@@ -11,6 +11,3 @@ python-multipart==0.0.32
 # Import de planilhas (Movimentação B3)
 pandas==3.0.3
 openpyxl==3.1.5
-
-# Testes
-pytest==9.1.1
