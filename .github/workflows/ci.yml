@@ -55,11 +55,14 @@ jobs:
       SUPABASE_JWKS_URL: https://exemplo.invalid/jwks
 
     steps:
+      # checkout@v4 e setup-python@v5 rodam em Node 20, deprecado nos runners —
+      # o GitHub já os forçava em Node 24 e avisava a cada execução. As versões
+      # abaixo declaram node24 nativamente.
       - name: Checkout do código
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: 'pip'
