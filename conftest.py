@@ -15,7 +15,7 @@ from uuid import UUID
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.engine.url import make_url
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 # `app.core.config` é seguro de importar aqui: ele só lê o .env/ambiente e não
 # constrói o engine. Quem faz isso é `app.core.db`, importado logo abaixo.
@@ -66,7 +66,7 @@ def _exigir_banco_de_testes() -> None:
 _exigir_banco_de_testes()
 
 from app.core import brapi_client  # noqa: E402
-from app.core.db import Base  # noqa: E402
+from app.core.db import Base, get_db  # noqa: E402
 from app.core.security import CurrentUser, get_current_user  # noqa: E402
 from app.main import app  # noqa: E402
 
@@ -120,6 +120,47 @@ async def schema(engine: AsyncEngine) -> AsyncGenerator[None, None]:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
+
+
+@pytest.fixture
+async def db_session(
+    engine: AsyncEngine, schema: None
+) -> AsyncGenerator[AsyncSession, None]:
+    """Uma sessão real do banco, por teste.
+
+    Depende de `schema` só pelo efeito colateral — sem essa declaração nada
+    garantiria a ordem, e a sessão poderia abrir contra um banco sem tabelas.
+
+    Não reusa o `async_session` de `app.core.db`: aquele sessionmaker está
+    amarrado ao engine global. `expire_on_commit=False` espelha a configuração
+    da aplicação, para que o comportamento dos objetos após um commit seja o
+    mesmo que em produção.
+
+    Escopo de função (a sessão é barata), mas roda no event loop de sessão — o
+    mesmo do engine, que é o que faz o pool de conexões funcionar.
+    """
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        yield session
+
+
+@pytest.fixture
+def override_get_db(
+    override_dependency: Callable[..., None], db_session: AsyncSession
+) -> AsyncSession:
+    """Faz os endpoints receberem a sessão do teste no `Depends(get_db)`.
+
+    Sobrescreve o objeto `get_db` importado de `app.core.db` — o mesmo que os
+    routers e `get_owned_carteira` referenciam, então uma única substituição
+    cobre todos eles.
+
+    É esta fixture que impede a requisição de cair no engine global montado no
+    import. Devolve a mesma sessão para o teste poder arranjar e conferir dados
+    exatamente no estado que o endpoint enxerga.
+
+    A limpeza do override é do `limpar_dependency_overrides` (autouse).
+    """
+    override_dependency(get_db, db_session)
+    return db_session
 
 
 @pytest.fixture
