@@ -1,14 +1,17 @@
 name: Backend CI
 
+# `master` é o branch default do repositório; `main` não existe. Enquanto os
+# gatilhos apontavam para `main`, nenhuma execução do Backend CI acontecia em
+# master — nem no push, nem em PR vindo de develop.
 on:
   push:
     branches:
-      - main
+      - master
       - develop
 
   pull_request:
     branches:
-      - main
+      - master
       - develop
 
 jobs:
