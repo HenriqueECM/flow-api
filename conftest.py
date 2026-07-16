@@ -14,6 +14,7 @@ from uuid import UUID
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
@@ -25,15 +26,23 @@ from app.core.config import settings
 # possível produção e aborta a sessão.
 HOSTS_LOCAIS = frozenset({"localhost", "127.0.0.1", "::1"})
 
+# Marca exigida no nome da base. Host local não basta: o Postgres de
+# desenvolvimento do próprio dev também é local, e a suíte trunca as tabelas.
+MARCA_BANCO_TESTE = "_test"
+
 
 def _exigir_banco_de_testes() -> None:
-    """Aborta a sessão se DATABASE_URL não apontar para um Postgres local.
+    """Aborta a sessão se DATABASE_URL não apontar para um banco de testes.
 
     O engine de `app.core.db` nasce no import do módulo, a partir de
     `settings.database_url`, e este conftest importa `app.main` — então toda
     execução de teste tem um engine apontando para onde a URL mandar. Um
     override de `get_db` esquecido bastaria para um teste gravar no Supabase de
     produção, silenciosamente e passando.
+
+    São dois riscos distintos, daí duas checagens: o host protege contra bancos
+    remotos (produção); o nome da base protege contra o banco de
+    desenvolvimento local, que a fixture `limpar_banco` esvaziaria a cada teste.
 
     A checagem é feita contra `settings` (e não contra `os.environ`) de
     propósito: é assim que ela enxerga a URL vinda do `.env` de
@@ -50,6 +59,14 @@ def _exigir_banco_de_testes() -> None:
         raise pytest.UsageError(
             f"DATABASE_URL aponta para o host '{url.host}', que não é local. "
             f"Os testes recusam qualquer banco que possa ser produção.\n{ajuda}"
+        )
+
+    if not url.database or MARCA_BANCO_TESTE not in url.database:
+        raise pytest.UsageError(
+            f"DATABASE_URL aponta para a base '{url.database}', cujo nome não "
+            f"contém '{MARCA_BANCO_TESTE}'. A suíte esvazia as tabelas a cada "
+            f"teste — apontá-la para um banco de desenvolvimento apagaria os "
+            f"seus dados.\n{ajuda}"
         )
 
     if url.drivername != "postgresql+asyncpg":
@@ -123,13 +140,37 @@ async def schema(engine: AsyncEngine) -> AsyncGenerator[None, None]:
 
 
 @pytest.fixture
+async def limpar_banco(engine: AsyncEngine, schema: None) -> AsyncGenerator[None, None]:
+    """Esvazia as tabelas ao fim de cada teste que use o banco.
+
+    Os endpoints commitam de verdade, então sem isso o dado de um teste
+    sobreviveria para o seguinte e a suíte passaria a depender da ordem de
+    execução.
+
+    As tabelas saem de `Base.metadata` — a mesma fonte do `create_all` —, então
+    uma tabela nova é incluída sozinha, sem lista para manter em dia. Um único
+    TRUNCATE com todas elas: `CASCADE` cobre as FKs e a ordem deixa de importar.
+
+    Roda no teardown, e só depois que a `db_session` fechou: TRUNCATE exige lock
+    ACCESS EXCLUSIVE e ficaria bloqueado por uma transação ainda aberta nas
+    mesmas tabelas. É a `db_session` depender desta fixture que garante essa
+    ordem — o pytest finaliza na ordem inversa da construção.
+    """
+    yield
+    tabelas = ", ".join(t.name for t in Base.metadata.sorted_tables)
+    async with engine.begin() as conn:
+        await conn.execute(text(f"TRUNCATE TABLE {tabelas} CASCADE"))
+
+
+@pytest.fixture
 async def db_session(
-    engine: AsyncEngine, schema: None
+    engine: AsyncEngine, schema: None, limpar_banco: None
 ) -> AsyncGenerator[AsyncSession, None]:
     """Uma sessão real do banco, por teste.
 
-    Depende de `schema` só pelo efeito colateral — sem essa declaração nada
-    garantiria a ordem, e a sessão poderia abrir contra um banco sem tabelas.
+    Depende de `schema` e `limpar_banco` pelo efeito colateral: o primeiro
+    garante que as tabelas existam antes da sessão abrir; o segundo, que elas
+    sejam esvaziadas depois que ela fechar.
 
     Não reusa o `async_session` de `app.core.db`: aquele sessionmaker está
     amarrado ao engine global. `expire_on_commit=False` espelha a configuração
