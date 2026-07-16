@@ -252,20 +252,39 @@ def test_falha_de_infra_no_jwks_vira_401_e_nao_500(jwks_indisponivel, erro):
     assert exc.value.status_code == 401
 
 
-# ── Comportamento conhecido, indesejado ──────────────────────────────────────
+# ── Formato do `sub` ─────────────────────────────────────────────────────────
 
 
-def test_sub_que_nao_e_uuid_estoura_em_vez_de_recusar(chave, jwks):
-    """Caracteriza um defeito, não o aprova.
-
-    `UUID(sub)` é feito fora do try/except, então um token válido cujo `sub` não
-    seja um UUID produz ValueError não tratado — 500 em vez de 401. Não é
-    explorável (exige assinatura válida, e o Supabase sempre emite UUID), mas um
-    emissor futuro com `sub` textual derrubaria o endpoint. Registrado como
-    dívida; quando for corrigido, este teste deve falhar e ser atualizado.
-    """
+@pytest.mark.parametrize(
+    "sub",
+    ["nao-e-um-uuid", "user-123", "3f1b7c9e-0000-4a00-9000", "00000000000000000000"],
+    ids=["texto", "texto com hifen", "uuid truncado", "digitos demais"],
+)
+def test_sub_que_nao_e_uuid_e_recusado_com_401(chave, jwks, sub):
+    # Antes, o UUID(sub) ficava fora do try/except e um token assinado com `sub`
+    # textual virava ValueError não tratado — 500 em vez de 401. Não era
+    # explorável (exige assinatura válida), mas derrubava a rota.
     jwks(chave.public_key())
-    token = jwt.encode(_claims(sub="nao-e-um-uuid"), chave, algorithm="ES256")
+    token = jwt.encode(_claims(sub=sub), chave, algorithm="ES256")
 
-    with pytest.raises(ValueError):
+    with pytest.raises(HTTPException) as exc:
         get_current_user(_credenciais(token))
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == "Token com identificação de usuário inválida."
+
+
+@pytest.mark.parametrize("sub", [123, 12.5, ["uuid"], {"id": "uuid"}])
+def test_sub_que_nao_e_texto_e_recusado_pelo_pyjwt(chave, jwks, sub):
+    # O `sub` vem de JSON e poderia chegar como número ou objeto. Não chega ao
+    # UUID(): o PyJWT valida o tipo no decode (InvalidSubjectError, subclasse de
+    # PyJWTError) e o erro já cai no tratamento de token inválido. O teste trava
+    # essa garantia — ela vem da versão pinada da biblioteca, não do nosso código.
+    jwks(chave.public_key())
+    token = jwt.encode(_claims(sub=sub), chave, algorithm="ES256")
+
+    with pytest.raises(HTTPException) as exc:
+        get_current_user(_credenciais(token))
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == "Token inválido ou expirado."
