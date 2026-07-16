@@ -7,3 +7,11 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Artefatos de cobertura. O .coverage é um SQLite com os caminhos absolutos da
+# máquina que rodou a suíte — versionado, sujava o diff a cada execução e, com o
+# repositório público, expunha a estrutura de diretórios local.
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
