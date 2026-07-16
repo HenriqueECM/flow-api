@@ -16,11 +16,40 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    # Postgres efêmero, exclusivo desta execução. Sobe antes do primeiro step e
+    # é destruído junto com o job — os testes nunca falam com o Supabase.
+    services:
+      postgres:
+        # Espelhe aqui a versão major do seu projeto Supabase.
+        # Mínimo: 13 (a partir dela gen_random_uuid() é nativo, sem pgcrypto).
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: flow
+          POSTGRES_PASSWORD: flow
+          POSTGRES_DB: flow_test
+        # Os steps rodam no host do runner (o job não usa `container:`), então o
+        # banco só é alcançável por uma porta publicada em localhost.
+        ports:
+          - 5432:5432
+        # Sem healthcheck, os steps começariam com o Postgres ainda subindo.
+        # O start-period cobre o restart que a imagem faz ao final do init.
+        options: >-
+          --health-cmd "pg_isready -U flow -d flow_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --health-start-period 10s
+
     env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      SUPABASE_JWKS_URL: ${{ secrets.SUPABASE_JWKS_URL }}
-      SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET }}
-      BRAPI_TOKEN: ${{ secrets.BRAPI_TOKEN }}
+      # Aponta para o container acima. Deliberadamente literal, e não um secret:
+      # a URL de produção não fica disponível no processo que roda os testes.
+      # Credenciais fracas são intencionais — o banco vive minutos, só aceita
+      # conexão de dentro do runner e não contém nada.
+      DATABASE_URL: postgresql+asyncpg://flow:flow@localhost:5432/flow_test
+      # Exigido pelo Settings() no import, mas nunca acessado: get_current_user
+      # é sobrescrito nos testes. Domínio inválido de propósito — se algum teste
+      # exercitar o caminho real do JWKS, ele falha em vez de ir à rede.
+      SUPABASE_JWKS_URL: https://exemplo.invalid/jwks
 
     steps:
       - name: Checkout do código
