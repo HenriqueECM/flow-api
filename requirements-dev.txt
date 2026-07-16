@@ -13,3 +13,6 @@ ruff==0.15.21
 
 # Um formatador de código é uma ferramenta que organiza o código de acordo com um padrão.
 black==26.5.1
+
+coverage==7.15.2
+pytest-cov==7.1.0
