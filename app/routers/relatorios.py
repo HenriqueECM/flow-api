@@ -22,6 +22,9 @@ _PM_QUANT = Decimal("0.0001")
 async def get_relatorio_yoc(
     carteira: Carteira = Depends(get_owned_carteira),
     db: AsyncSession = Depends(get_db),
+    ticker: str | None = None,
+    data_inicio: date | None = None,
+    data_fim: date | None = None,
 ) -> RelatorioYocOut:
     """YoC consolidado por ativo e da carteira, ponderado por evento.
 
@@ -30,6 +33,9 @@ async def get_relatorio_yoc(
     - O YoC de cada ativo e o consolidado usam os campos persistidos de cada
       provento (quantidade, PM histórico, valor recebido no momento da criação),
       então um provento de ciclo antigo contribui com o seu próprio PM.
+    - `ticker`, `data_inicio` e `data_fim` são filtros opcionais do KPI: afetam
+      apenas `consolidado.valor_recebido_total`/`yoc_total`. A tabela `ativos` e
+      os campos de 12m são sempre retornados sem filtro.
     """
     # Transações → posições abertas por ticker.
     result = await db.execute(
@@ -45,15 +51,15 @@ async def get_relatorio_yoc(
 
     hoje = date.today()
     ativos: list[AtivoPosicao] = []
-    for ticker, txs in por_ticker.items():
+    for tk, txs in por_ticker.items():
         pos = calcular_posicao_em_data(txs, hoje)
         if pos.quantidade <= 0:
             continue
         # Nome mais recente informado nas transações; cai para o ticker se nulo.
-        nome = next((t.nome for t in reversed(txs) if t.nome), ticker)
+        nome = next((t.nome for t in reversed(txs) if t.nome), tk)
         ativos.append(
             AtivoPosicao(
-                ticker=ticker,
+                ticker=tk,
                 nome=nome,
                 quantidade=pos.quantidade,
                 pm_historico=pos.pm_historico.quantize(_PM_QUANT, rounding=ROUND_HALF_UP),
@@ -69,5 +75,12 @@ async def get_relatorio_yoc(
     for p in result_prov.scalars().all():
         proventos_por_ticker[p.ticker.upper()].append(p)
 
-    relatorio = calcular_relatorio_yoc(ativos, proventos_por_ticker, hoje)
+    relatorio = calcular_relatorio_yoc(
+        ativos,
+        proventos_por_ticker,
+        hoje,
+        ticker=ticker,
+        data_inicio=data_inicio,
+        data_fim=data_fim,
+    )
     return RelatorioYocOut.model_validate(relatorio)
