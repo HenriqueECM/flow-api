@@ -13,6 +13,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
+import respx
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.engine.url import make_url
@@ -265,6 +266,31 @@ def limpar_dependency_overrides() -> Generator[None, None, None]:
     para trás vazaria para todos os testes seguintes. Limpa depois de cada um."""
     yield
     app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True)
+def bloquear_http_externo() -> Generator[respx.MockRouter, None, None]:
+    """Faz qualquer requisição HTTP real estourar durante os testes.
+
+    Sem isso, um teste de `/posicoes` que esquecesse o mock chamaria a brapi.dev
+    de verdade: lento, intermitente e sujeito a rate limit. Pior, o
+    `brapi_client` engole falhas de rede por design e devolve `{}` — o teste
+    falharia por um motivo que não é o que ele investiga. Aqui a requisição
+    esquecida vira um erro explícito, apontando a URL.
+
+    Autouse (ao contrário de `limpar_banco`) porque não custa nada: o respx só
+    patcheia o httpx em memória, sem exigir serviço externo nenhum.
+
+    Não registra rota alguma: bloquear é o objetivo, e cada teste declara os
+    seus mocks pedindo esta fixture e chamando `router.get(...)`. Por isso
+    `assert_all_called=False` — o padrão do respx faria um teste falhar por
+    registrar uma rota e não usá-la, o que é asserção de teste, não de harness.
+
+    Não intercepta o `client`: o respx patcheia os pools do httpcore (rede
+    real), e o `ASGITransport` fala direto com o app sem passar por lá.
+    """
+    with respx.mock(assert_all_called=False) as router:
+        yield router
 
 
 @pytest.fixture(autouse=True)
