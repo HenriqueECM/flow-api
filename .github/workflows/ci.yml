@@ -16,6 +16,12 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SUPABASE_JWS_URL: ${{ secrets.SUPABASE_JWS_URL }}
+      SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET }}
+      BRAPI_TOKEN: ${{ secrets.BRAPI_TOKEN }}
+
     steps:
       - name: Checkout do código
         uses: actions/checkout@v4
