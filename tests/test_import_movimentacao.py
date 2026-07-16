@@ -39,10 +39,28 @@ def _df(linhas):
 
 
 def test_validas_e_ignoradas():
-    df = _df([
-        _linha("Credito", "05/01/2024", "Transferência - Liquidação", "PETR4 - PETROBRAS PN", 100, 30.0, 3000.0),
-        _linha("Credito", "10/01/2024", "Dividendo", "PETR4 - PETROBRAS PN", 100, 0.5, 50.0),
-    ])
+    df = _df(
+        [
+            _linha(
+                "Credito",
+                "05/01/2024",
+                "Transferência - Liquidação",
+                "PETR4 - PETROBRAS PN",
+                100,
+                30.0,
+                3000.0,
+            ),
+            _linha(
+                "Credito",
+                "10/01/2024",
+                "Dividendo",
+                "PETR4 - PETROBRAS PN",
+                100,
+                0.5,
+                50.0,
+            ),
+        ]
+    )
 
     rows, summary = parse_dataframe(df)
 
@@ -64,10 +82,28 @@ def test_validas_e_ignoradas():
 
 
 def test_venda_maior_que_posicao_vira_erro():
-    df = _df([
-        _linha("Credito", "05/01/2024", "Transferência - Liquidação", "VALE3 - VALE ON", 100, 60.0, 6000.0),
-        _linha("Debito", "06/01/2024", "Transferência - Liquidação", "VALE3 - VALE ON", 150, 65.0, 9750.0),
-    ])
+    df = _df(
+        [
+            _linha(
+                "Credito",
+                "05/01/2024",
+                "Transferência - Liquidação",
+                "VALE3 - VALE ON",
+                100,
+                60.0,
+                6000.0,
+            ),
+            _linha(
+                "Debito",
+                "06/01/2024",
+                "Transferência - Liquidação",
+                "VALE3 - VALE ON",
+                150,
+                65.0,
+                9750.0,
+            ),
+        ]
+    )
 
     rows, summary = parse_dataframe(df)
 
@@ -81,10 +117,28 @@ def test_venda_maior_que_posicao_vira_erro():
 def test_reversao_ordem_cronologica():
     # Arquivo em ordem decrescente (B3): venda (mais recente) antes da compra.
     # Sem reversão, a venda seria processada primeiro e viraria erro.
-    df = _df([
-        _linha("Debito", "10/02/2024", "Transferência - Liquidação", "ITUB4 - ITAU PN", 50, 32.0, 1600.0),
-        _linha("Credito", "05/01/2024", "Transferência - Liquidação", "ITUB4 - ITAU PN", 100, 30.0, 3000.0),
-    ])
+    df = _df(
+        [
+            _linha(
+                "Debito",
+                "10/02/2024",
+                "Transferência - Liquidação",
+                "ITUB4 - ITAU PN",
+                50,
+                32.0,
+                1600.0,
+            ),
+            _linha(
+                "Credito",
+                "05/01/2024",
+                "Transferência - Liquidação",
+                "ITUB4 - ITAU PN",
+                100,
+                30.0,
+                3000.0,
+            ),
+        ]
+    )
 
     rows, summary = parse_dataframe(df)
 
@@ -98,10 +152,28 @@ def test_reversao_ordem_cronologica():
 def test_credito_e_compra_debito_e_venda():
     # Credito = ação entrando na custódia = compra.
     # Debito = ação saindo da custódia = venda.
-    df = _df([
-        _linha("Credito", "05/01/2024", "Transferência - Liquidação", "BBAS3 - BRASIL ON", 100, 20.0, 2000.0),
-        _linha("Debito", "10/01/2024", "Transferência - Liquidação", "BBAS3 - BRASIL ON", 40, 22.0, 880.0),
-    ])
+    df = _df(
+        [
+            _linha(
+                "Credito",
+                "05/01/2024",
+                "Transferência - Liquidação",
+                "BBAS3 - BRASIL ON",
+                100,
+                20.0,
+                2000.0,
+            ),
+            _linha(
+                "Debito",
+                "10/01/2024",
+                "Transferência - Liquidação",
+                "BBAS3 - BRASIL ON",
+                40,
+                22.0,
+                880.0,
+            ),
+        ]
+    )
 
     rows, summary = parse_dataframe(df)
 
@@ -117,12 +189,46 @@ def test_sequencia_com_bonificacao_e_fracao():
     # Compra 100 → bonificação +10 (pos 110) → fração -2 (pos 108) → venda 105.
     # Sem contar bonificação/fração no motor, a venda de 105 excederia a posição
     # (100) e viraria "erro" — o teste garante que ambos entram na sequência.
-    df = _df([
-        _linha("Credito", "05/01/2024", "Transferência - Liquidação", "PETR4 - PETROBRAS PN", 100, 30.0, 3000.0),
-        _linha("Credito", "10/01/2024", "Bonificação em Ativos", "PETR4 - PETROBRAS PN", 10, "-", "-"),
-        _linha("Debito", "15/01/2024", "Fração em Ativos", "PETR4 - PETROBRAS PN", 2, "-", "-"),
-        _linha("Debito", "20/01/2024", "Transferência - Liquidação", "PETR4 - PETROBRAS PN", 105, 35.0, 3675.0),
-    ])
+    df = _df(
+        [
+            _linha(
+                "Credito",
+                "05/01/2024",
+                "Transferência - Liquidação",
+                "PETR4 - PETROBRAS PN",
+                100,
+                30.0,
+                3000.0,
+            ),
+            _linha(
+                "Credito",
+                "10/01/2024",
+                "Bonificação em Ativos",
+                "PETR4 - PETROBRAS PN",
+                10,
+                "-",
+                "-",
+            ),
+            _linha(
+                "Debito",
+                "15/01/2024",
+                "Fração em Ativos",
+                "PETR4 - PETROBRAS PN",
+                2,
+                "-",
+                "-",
+            ),
+            _linha(
+                "Debito",
+                "20/01/2024",
+                "Transferência - Liquidação",
+                "PETR4 - PETROBRAS PN",
+                105,
+                35.0,
+                3675.0,
+            ),
+        ]
+    )
 
     rows, summary = parse_dataframe(df)
 
@@ -141,11 +247,37 @@ def test_sequencia_com_bonificacao_e_fracao():
 def test_fii_ignorado_sem_afetar_outros():
     # FII deve ser ignorado (só Ações por ora), sem interferir no cálculo de
     # posição de outros tickers no mesmo arquivo.
-    df = _df([
-        _linha("Credito", "05/01/2024", "Transferência - Liquidação", "MXRF11 - MAXI RENDA FDO INV IMOB - FII", 100, 10.0, 1000.0),
-        _linha("Credito", "06/01/2024", "Transferência - Liquidação", "PETR4 - PETROBRAS PN", 50, 30.0, 1500.0),
-        _linha("Debito", "07/01/2024", "Transferência - Liquidação", "PETR4 - PETROBRAS PN", 50, 32.0, 1600.0),
-    ])
+    df = _df(
+        [
+            _linha(
+                "Credito",
+                "05/01/2024",
+                "Transferência - Liquidação",
+                "MXRF11 - MAXI RENDA FDO INV IMOB - FII",
+                100,
+                10.0,
+                1000.0,
+            ),
+            _linha(
+                "Credito",
+                "06/01/2024",
+                "Transferência - Liquidação",
+                "PETR4 - PETROBRAS PN",
+                50,
+                30.0,
+                1500.0,
+            ),
+            _linha(
+                "Debito",
+                "07/01/2024",
+                "Transferência - Liquidação",
+                "PETR4 - PETROBRAS PN",
+                50,
+                32.0,
+                1600.0,
+            ),
+        ]
+    )
 
     rows, summary = parse_dataframe(df)
 
@@ -162,9 +294,19 @@ def test_fii_ignorado_sem_afetar_outros():
 def test_fii_como_palavra_isolada_nao_substring():
     # "AFII" contém "fii" como substring, mas não como palavra isolada — deve
     # ser tratado normalmente (compra válida), não ignorado como FII.
-    df = _df([
-        _linha("Credito", "05/01/2024", "Transferência - Liquidação", "XPTO3 - EMPRESA AFII SA", 100, 10.0, 1000.0),
-    ])
+    df = _df(
+        [
+            _linha(
+                "Credito",
+                "05/01/2024",
+                "Transferência - Liquidação",
+                "XPTO3 - EMPRESA AFII SA",
+                100,
+                10.0,
+                1000.0,
+            ),
+        ]
+    )
 
     rows, summary = parse_dataframe(df)
 
@@ -173,10 +315,28 @@ def test_fii_como_palavra_isolada_nao_substring():
 
 
 def test_tipos_ignorados_continuam_ignorados():
-    df = _df([
-        _linha("Credito", "05/01/2024", "Direito de Subscrição", "PETR4 - PETROBRAS PN", 5, "-", "-"),
-        _linha("Debito", "06/01/2024", "Leilão de Fração", "VALE3 - VALE ON", 1, 60.0, 60.0),
-    ])
+    df = _df(
+        [
+            _linha(
+                "Credito",
+                "05/01/2024",
+                "Direito de Subscrição",
+                "PETR4 - PETROBRAS PN",
+                5,
+                "-",
+                "-",
+            ),
+            _linha(
+                "Debito",
+                "06/01/2024",
+                "Leilão de Fração",
+                "VALE3 - VALE ON",
+                1,
+                60.0,
+                60.0,
+            ),
+        ]
+    )
 
     rows, summary = parse_dataframe(df)
 
@@ -186,9 +346,19 @@ def test_tipos_ignorados_continuam_ignorados():
 
 
 def test_ticker_nao_parseavel_vira_erro():
-    df = _df([
-        _linha("Debito", "05/01/2024", "Transferência - Liquidação", "", 100, 30.0, 3000.0),
-    ])
+    df = _df(
+        [
+            _linha(
+                "Debito",
+                "05/01/2024",
+                "Transferência - Liquidação",
+                "",
+                100,
+                30.0,
+                3000.0,
+            ),
+        ]
+    )
 
     rows, summary = parse_dataframe(df)
 
@@ -204,11 +374,37 @@ def test_revalidate_correcao_reabilita_linha_seguinte_do_mesmo_ticker():
     # Cenário: compra 100 → venda 150 (excede) → venda 40.
     # No preview, a 1ª venda excede (erro) e não consome posição, então a 2ª
     # venda de 40 ainda cabe (100 disponível) — fica válida.
-    df = _df([
-        _linha("Credito", "05/01/2024", "Transferência - Liquidação", "VALE3 - VALE ON", 100, 60.0, 6000.0),
-        _linha("Debito", "06/01/2024", "Transferência - Liquidação", "VALE3 - VALE ON", 150, 65.0, 9750.0),
-        _linha("Debito", "07/01/2024", "Transferência - Liquidação", "VALE3 - VALE ON", 40, 66.0, 2640.0),
-    ])
+    df = _df(
+        [
+            _linha(
+                "Credito",
+                "05/01/2024",
+                "Transferência - Liquidação",
+                "VALE3 - VALE ON",
+                100,
+                60.0,
+                6000.0,
+            ),
+            _linha(
+                "Debito",
+                "06/01/2024",
+                "Transferência - Liquidação",
+                "VALE3 - VALE ON",
+                150,
+                65.0,
+                9750.0,
+            ),
+            _linha(
+                "Debito",
+                "07/01/2024",
+                "Transferência - Liquidação",
+                "VALE3 - VALE ON",
+                40,
+                66.0,
+                2640.0,
+            ),
+        ]
+    )
     rows, summary = parse_dataframe(df)
     assert [r.status for r in rows] == ["valido", "erro", "valido"]
 
@@ -233,11 +429,37 @@ def test_revalidate_correcao_menor_reabilita_linha_seguinte_valida():
     # menor, a própria linha vira válida E a linha seguinte do mesmo ticker,
     # que dava erro por causa do acumulado incorreto, vira válida sozinha.
     # Sequência: compra 100 → venda 90 → venda 20.
-    df = _df([
-        _linha("Credito", "05/01/2024", "Transferência - Liquidação", "ITUB4 - ITAU PN", 100, 30.0, 3000.0),
-        _linha("Debito", "06/01/2024", "Transferência - Liquidação", "ITUB4 - ITAU PN", 90, 32.0, 2880.0),
-        _linha("Debito", "07/01/2024", "Transferência - Liquidação", "ITUB4 - ITAU PN", 20, 33.0, 660.0),
-    ])
+    df = _df(
+        [
+            _linha(
+                "Credito",
+                "05/01/2024",
+                "Transferência - Liquidação",
+                "ITUB4 - ITAU PN",
+                100,
+                30.0,
+                3000.0,
+            ),
+            _linha(
+                "Debito",
+                "06/01/2024",
+                "Transferência - Liquidação",
+                "ITUB4 - ITAU PN",
+                90,
+                32.0,
+                2880.0,
+            ),
+            _linha(
+                "Debito",
+                "07/01/2024",
+                "Transferência - Liquidação",
+                "ITUB4 - ITAU PN",
+                20,
+                33.0,
+                660.0,
+            ),
+        ]
+    )
     rows, summary = parse_dataframe(df)
     # Preview: venda 90 ok (pos 10); venda 20 excede 10 → erro.
     assert [r.status for r in rows] == ["valido", "valido", "erro"]
@@ -257,9 +479,20 @@ def test_revalidate_correcao_menor_reabilita_linha_seguinte_valida():
 def test_revalidate_mantem_ignorado_fora_da_posicao():
     # Linha ignorada permanece ignorada e não interfere na reclassificação.
     linhas = [
-        ReviewRow(status="valido", ativo="PETR4", qtde=100.0, tipo="Compra", data="2024-01-05"),
-        ReviewRow(status="ignorado", ativo="PETR4", qtde=50.0, tipo="", data="2024-01-06", motivo="Dividendo — não será importado"),
-        ReviewRow(status="valido", ativo="PETR4", qtde=100.0, tipo="Venda", data="2024-01-07"),
+        ReviewRow(
+            status="valido", ativo="PETR4", qtde=100.0, tipo="Compra", data="2024-01-05"
+        ),
+        ReviewRow(
+            status="ignorado",
+            ativo="PETR4",
+            qtde=50.0,
+            tipo="",
+            data="2024-01-06",
+            motivo="Dividendo — não será importado",
+        ),
+        ReviewRow(
+            status="valido", ativo="PETR4", qtde=100.0, tipo="Venda", data="2024-01-07"
+        ),
     ]
 
     revalidadas, resumo = revalidar_lote(linhas)
@@ -279,9 +512,9 @@ def test_lote_venda_isolada_falha_sem_bloquear_demais():
     # Posição inicial (banco): PETR4 = 100.
     posicao = {"PETR4": Decimal(100)}
     itens = [
-        ("PETR4", "venda", Decimal(60)),   # ok  → disp 100→40
-        ("PETR4", "venda", Decimal(60)),   # excede 40 → falha (não altera)
-        ("PETR4", "compra", Decimal(100)), # ok  → 40→140
+        ("PETR4", "venda", Decimal(60)),  # ok  → disp 100→40
+        ("PETR4", "venda", Decimal(60)),  # excede 40 → falha (não altera)
+        ("PETR4", "compra", Decimal(100)),  # ok  → 40→140
         ("PETR4", "venda", Decimal(100)),  # ok  → 140→40
     ]
 
@@ -299,7 +532,7 @@ def test_lote_sem_posicao_inicial_venda_excede():
     posicao: dict[str, Decimal] = {}
     itens = [
         ("VALE3", "compra", Decimal(100)),  # ok → 100
-        ("VALE3", "venda", Decimal(150)),   # excede 100 → falha
+        ("VALE3", "venda", Decimal(150)),  # excede 100 → falha
     ]
 
     motivos = validar_posicao_lote(posicao, itens)

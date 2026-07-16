@@ -62,7 +62,9 @@ async def get_relatorio_yoc(
                 ticker=tk,
                 nome=nome,
                 quantidade=pos.quantidade,
-                pm_historico=pos.pm_historico.quantize(_PM_QUANT, rounding=ROUND_HALF_UP),
+                pm_historico=pos.pm_historico.quantize(
+                    _PM_QUANT, rounding=ROUND_HALF_UP
+                ),
             )
         )
     ativos.sort(key=lambda a: a.ticker)  # saída estável

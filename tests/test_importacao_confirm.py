@@ -117,7 +117,7 @@ def test_confirm_duplicata_exige_correspondencia_exata():
 
     payload = ImportConfirmIn(
         rows=[
-            _row("PETR4", "Venda", 100.0, 30.0, "2024-01-05"),   # operação difere
+            _row("PETR4", "Venda", 100.0, 30.0, "2024-01-05"),  # operação difere
             _row("PETR4", "Compra", 100.0, 31.0, "2024-01-05"),  # preço difere
         ]
     )

@@ -16,9 +16,7 @@ async def get_owned_carteira(
 ) -> Carteira:
     """Carrega a carteira garantindo que ela pertence ao usuário autenticado."""
     result = await db.execute(
-        select(Carteira).where(
-            Carteira.id == carteira_id, Carteira.user_id == user.id
-        )
+        select(Carteira).where(Carteira.id == carteira_id, Carteira.user_id == user.id)
     )
     carteira = result.scalar_one_or_none()
     if carteira is None:

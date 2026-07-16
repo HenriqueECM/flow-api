@@ -77,7 +77,9 @@ def test_separa_12m_de_total():
     proventos = {
         "BBAS3": [
             _prov("BBAS3", recebido=60, yoc="6.0000", data_pag=date(2024, 3, 1)),  # 12m
-            _prov("BBAS3", recebido=50, yoc="5.0000", data_pag=date(2022, 1, 1)),  # fora
+            _prov(
+                "BBAS3", recebido=50, yoc="5.0000", data_pag=date(2022, 1, 1)
+            ),  # fora
         ],
     }
 
@@ -127,8 +129,12 @@ def test_consolidado_e_soma_simples_nao_ponderada():
     # Exemplo do enunciado: 10% + 2% = 12% (não média 6%, não ponderação por custo).
     ativos = [_ativo("AAAA3", 100, 10), _ativo("BBBB3", 100, 50)]
     proventos = {
-        "AAAA3": [_prov("AAAA3", recebido=100, yoc="10.0000", data_pag=date(2024, 1, 15))],
-        "BBBB3": [_prov("BBBB3", recebido=100, yoc="2.0000", data_pag=date(2024, 1, 15))],
+        "AAAA3": [
+            _prov("AAAA3", recebido=100, yoc="10.0000", data_pag=date(2024, 1, 15))
+        ],
+        "BBBB3": [
+            _prov("BBBB3", recebido=100, yoc="2.0000", data_pag=date(2024, 1, 15))
+        ],
     }
 
     rel = calcular_relatorio_yoc(ativos, proventos, HOJE)
@@ -153,7 +159,13 @@ def test_jcp_entra_liquido_na_soma():
     ativos = [_ativo("TAEE11", 100, 10)]
     proventos = {
         "TAEE11": [
-            _prov("TAEE11", recebido=100, yoc="10.0000", data_pag=date(2024, 3, 1), tipo="JCP"),
+            _prov(
+                "TAEE11",
+                recebido=100,
+                yoc="10.0000",
+                data_pag=date(2024, 3, 1),
+                tipo="JCP",
+            ),
         ],
     }
 
@@ -171,8 +183,24 @@ def test_consolidado_soma_jcp_liquido_com_dividendo():
     # JCP 10% → 8,25% líquido; Dividendo 4% isento. Soma simples = 12,25%.
     ativos = [_ativo("AAAA3", 100, 10), _ativo("BBBB3", 100, 10)]
     proventos = {
-        "AAAA3": [_prov("AAAA3", recebido=100, yoc="10.0000", data_pag=date(2024, 1, 15), tipo="JCP")],
-        "BBBB3": [_prov("BBBB3", recebido=100, yoc="4.0000", data_pag=date(2024, 1, 15), tipo="Dividendo")],
+        "AAAA3": [
+            _prov(
+                "AAAA3",
+                recebido=100,
+                yoc="10.0000",
+                data_pag=date(2024, 1, 15),
+                tipo="JCP",
+            )
+        ],
+        "BBBB3": [
+            _prov(
+                "BBBB3",
+                recebido=100,
+                yoc="4.0000",
+                data_pag=date(2024, 1, 15),
+                tipo="Dividendo",
+            )
+        ],
     }
 
     rel = calcular_relatorio_yoc(ativos, proventos, HOJE)
@@ -194,8 +222,12 @@ def test_valor_recebido_ano_e_yoc_ano_do_ano_calendario():
     ativos = [_ativo("BBAS3", 100, 10)]
     proventos = {
         "BBAS3": [
-            _prov("BBAS3", recebido=40, yoc="4.0000", data_pag=date(2024, 3, 1)),  # 2024: ano + 12m
-            _prov("BBAS3", recebido=30, yoc="3.0000", data_pag=date(2023, 8, 1)),  # 12m, mas ano anterior
+            _prov(
+                "BBAS3", recebido=40, yoc="4.0000", data_pag=date(2024, 3, 1)
+            ),  # 2024: ano + 12m
+            _prov(
+                "BBAS3", recebido=30, yoc="3.0000", data_pag=date(2023, 8, 1)
+            ),  # 12m, mas ano anterior
         ],
     }
 
@@ -275,8 +307,11 @@ def test_filtro_so_por_ticker_afeta_apenas_consolidado_total():
 def test_filtro_so_por_periodo_afeta_total_do_consolidado_e_dos_ativos():
     ativos, proventos = _cenario_multi()
     rel = calcular_relatorio_yoc(
-        ativos, proventos, HOJE,
-        data_inicio=date(2024, 1, 1), data_fim=date(2024, 12, 31),
+        ativos,
+        proventos,
+        HOJE,
+        data_inicio=date(2024, 1, 1),
+        data_fim=date(2024, 12, 31),
     )
     cons = rel.consolidado
     # Só eventos de 2024: 4 (AAAA3) + 5 (BBBB3) = 9%.
@@ -294,8 +329,12 @@ def test_filtro_so_por_periodo_afeta_total_do_consolidado_e_dos_ativos():
 def test_filtro_por_ticker_e_periodo_juntos():
     ativos, proventos = _cenario_multi()
     rel = calcular_relatorio_yoc(
-        ativos, proventos, HOJE,
-        ticker="AAAA3", data_inicio=date(2024, 1, 1), data_fim=date(2024, 12, 31),
+        ativos,
+        proventos,
+        HOJE,
+        ticker="AAAA3",
+        data_inicio=date(2024, 1, 1),
+        data_fim=date(2024, 12, 31),
     )
     cons = rel.consolidado
     # AAAA3 em 2024: só o evento de março → 4%.
@@ -306,8 +345,11 @@ def test_filtro_por_ticker_e_periodo_juntos():
 def test_filtro_sem_nenhum_provento_no_recorte_retorna_null():
     ativos, proventos = _cenario_multi()
     rel = calcular_relatorio_yoc(
-        ativos, proventos, HOJE,
-        data_inicio=date(2025, 1, 1), data_fim=date(2025, 12, 31),
+        ativos,
+        proventos,
+        HOJE,
+        data_inicio=date(2025, 1, 1),
+        data_fim=date(2025, 12, 31),
     )
     cons = rel.consolidado
     assert cons.valor_recebido_total == Decimal("0.00")

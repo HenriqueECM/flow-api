@@ -10,3 +10,6 @@ pytest==9.1.1
 # Existe código morto?
 # Existe algum erro comum de Python?
 ruff==0.15.21
+
+# Um formatador de código é uma ferramenta que organiza o código de acordo com um padrão.
+black==26.5.1

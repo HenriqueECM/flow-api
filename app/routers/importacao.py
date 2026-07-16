@@ -41,9 +41,7 @@ async def preview_import_ativos(
     try:
         rows, summary = await run_in_threadpool(parse_movimentacao_ativos, conteudo)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     return ImportAtivosPreviewOut(rows=rows, summary=summary)
 
 
@@ -111,8 +109,7 @@ async def confirm_import_ativos(
     # data, quantidade, preço e operação) não é reimportada. A checagem é só
     # contra o banco — linhas iguais dentro deste mesmo lote são legítimas.
     itens_dup = [
-        (c.ticker, c.data, c.quantidade, c.preco_unit, c.operacao)
-        for _, c in mapeadas
+        (c.ticker, c.data, c.quantidade, c.preco_unit, c.operacao) for _, c in mapeadas
     ]
     duplicadas = detectar_duplicatas_no_banco(existentes, itens_dup)
     restantes: list[tuple[ReviewRow, TransacaoCreate]] = []

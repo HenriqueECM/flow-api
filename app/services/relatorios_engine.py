@@ -121,7 +121,9 @@ class _Acumulador:
         self, p: Provento, *, total: bool = False, m12: bool = False, ano: bool = False
     ) -> None:
         # Valores líquidos de IR (JCP retém 17,5%); demais tipos passam inalterados.
-        recebido = liquidar_valor_recebido(p.tipo_provento, p.valor_recebido) or Decimal(0)
+        recebido = liquidar_valor_recebido(
+            p.tipo_provento, p.valor_recebido
+        ) or Decimal(0)
         yoc = liquidar_yoc(p.tipo_provento, p.yoc_evento)  # None se yoc_evento nulo
 
         if total:
@@ -187,9 +189,15 @@ def calcular_relatorio_yoc(
                 nome=ativo.nome,
                 quantidade_atual=ativo.quantidade,
                 pm_historico_atual=ativo.pm_historico,
-                valor_recebido_12m=acc.recebido_12m.quantize(_CENTS, rounding=ROUND_HALF_UP),
-                valor_recebido_total=acc.recebido_total.quantize(_CENTS, rounding=ROUND_HALF_UP),
-                valor_recebido_ano=acc.recebido_ano.quantize(_CENTS, rounding=ROUND_HALF_UP),
+                valor_recebido_12m=acc.recebido_12m.quantize(
+                    _CENTS, rounding=ROUND_HALF_UP
+                ),
+                valor_recebido_total=acc.recebido_total.quantize(
+                    _CENTS, rounding=ROUND_HALF_UP
+                ),
+                valor_recebido_ano=acc.recebido_ano.quantize(
+                    _CENTS, rounding=ROUND_HALF_UP
+                ),
                 yoc_12m=_soma_yoc(acc.yoc_12m, acc.tem_yoc_12m),
                 yoc_total=_soma_yoc(acc.yoc_total, acc.tem_yoc_total),
                 yoc_ano=_soma_yoc(acc.yoc_ano, acc.tem_yoc_ano),
@@ -217,7 +225,9 @@ def calcular_relatorio_yoc(
     # 12m sem filtro (janela fixa); total restrito ao recorte do KPI.
     consolidado = YocConsolidado(
         valor_recebido_12m=geral.recebido_12m.quantize(_CENTS, rounding=ROUND_HALF_UP),
-        valor_recebido_total=filtrado.recebido_total.quantize(_CENTS, rounding=ROUND_HALF_UP),
+        valor_recebido_total=filtrado.recebido_total.quantize(
+            _CENTS, rounding=ROUND_HALF_UP
+        ),
         yoc_12m=_soma_yoc(geral.yoc_12m, geral.tem_yoc_12m),
         yoc_total=_soma_yoc(filtrado.yoc_total, filtrado.tem_yoc_total),
     )
