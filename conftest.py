@@ -15,6 +15,7 @@ from uuid import UUID
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.engine.url import make_url
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 # `app.core.config` é seguro de importar aqui: ele só lê o .env/ambiente e não
 # constrói o engine. Quem faz isso é `app.core.db`, importado logo abaixo.
@@ -65,12 +66,60 @@ def _exigir_banco_de_testes() -> None:
 _exigir_banco_de_testes()
 
 from app.core import brapi_client  # noqa: E402
+from app.core.db import Base  # noqa: E402
 from app.core.security import CurrentUser, get_current_user  # noqa: E402
 from app.main import app  # noqa: E402
 
 # Dono das carteiras nos testes. Fixo (não aleatório) para que uma falha seja
 # reproduzível e para permitir comparar o user_id gravado no banco.
 TEST_USER_ID = UUID("00000000-0000-0000-0000-000000000001")
+
+
+# ── Banco de testes ──────────────────────────────────────────────────────────
+# Nenhuma destas fixtures é autouse: só quem pedir `engine`/`schema` conecta no
+# Postgres. É o que mantém os testes de motor (services/) rodando sem banco
+# nenhum, como sempre rodaram.
+
+
+@pytest.fixture(scope="session")
+async def engine() -> AsyncGenerator[AsyncEngine, None]:
+    """O engine dos testes — deliberadamente distinto do global de `app.core.db`.
+
+    O global é construído no import a partir da mesma URL, mas é o engine que a
+    aplicação usaria em produção; mantê-los separados deixa explícito quem é o
+    dono da conexão nos testes e evita depender de estado montado no import.
+
+    Escopo de sessão porque abrir um engine (e criar o schema) por teste seria
+    desperdício; exige o loop de sessão configurado no pytest.ini. O `dispose()`
+    no teardown fecha o pool — sem ele, a suíte termina com conexões abertas e
+    o asyncpg reclama de tarefas pendentes no fim do processo.
+    """
+    eng = create_async_engine(settings.database_url)
+    try:
+        yield eng
+    finally:
+        await eng.dispose()
+
+
+@pytest.fixture(scope="session")
+async def schema(engine: AsyncEngine) -> AsyncGenerator[None, None]:
+    """Cria as tabelas a partir dos modelos, uma vez por execução.
+
+    `create_all` e não `sql/schema.sql`: aquele arquivo declara uma FK para
+    `auth.users`, schema que só existe dentro do Supabase, e falharia num
+    Postgres limpo. A contrapartida é conhecida — o CHECK de `operacao` que o
+    schema.sql tem não está nos modelos e, portanto, não existe aqui; o schema
+    de teste é um pouco mais permissivo que o de produção. Alembic resolve isso
+    depois, tornando os modelos a fonte única.
+
+    Não faz `drop_all` antes: a guarda de import garante que o banco é local,
+    mas "local" pode ser o Postgres de desenvolvimento do próprio dev. Como
+    `create_all` já é idempotente (checkfirst), o custo de não dropar é apenas
+    um schema defasado se os modelos mudarem — resolvido recriando a base à mão.
+    """
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
 
 
 @pytest.fixture
