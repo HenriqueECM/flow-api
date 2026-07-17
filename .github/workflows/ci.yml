@@ -89,13 +89,16 @@ jobs:
         run: |
           pytest --cov=app --cov-fail-under=93
 
-  # Job separado, e não um step do `build`: não precisa de Postgres, roda em
-  # paralelo, e uma falha aponta direto para o Dockerfile em vez de se misturar
-  # ao resultado dos testes.
+  # Job separado, e não um step do `build`: roda em paralelo e uma falha aponta
+  # direto para a imagem em vez de se misturar ao resultado dos testes.
   #
-  # Atenção: `build` é o único check exigido pela branch protection do master.
-  # Este job ainda NÃO é obrigatório — um Dockerfile quebrado passaria pelo
-  # portão. Incluir `docker` nos required checks é decisão à parte.
+  # Não usa `services:` para o Postgres. Os serviços do Actions sobem no host do
+  # runner, e `localhost` dentro de um container é o próprio container — a API
+  # não os alcançaria. Aqui o Postgres é um container irmão numa rede própria,
+  # endereçável pelo nome.
+  #
+  # `build` e `docker` são os dois checks exigidos pela branch protection do
+  # master: uma imagem quebrada bloqueia o merge.
   docker:
 
     runs-on: ubuntu-latest
@@ -115,3 +118,63 @@ jobs:
       # seriam ~299MB, quase todos do .venv.
       - name: Tamanho da imagem
         run: docker image ls flow-api:ci
+
+      - name: Sobe o Postgres na rede do teste
+        run: |
+          docker network create flow-ci
+          docker run -d --name pg --network flow-ci \
+            -e POSTGRES_USER=flow \
+            -e POSTGRES_PASSWORD=flow \
+            -e POSTGRES_DB=flow_test \
+            --health-cmd "pg_isready -U flow -d flow_test" \
+            --health-interval 2s \
+            postgres:16-alpine
+          for _ in $(seq 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' pg)" = healthy ] && exit 0
+            sleep 1
+          done
+          echo "Postgres não ficou saudável."; docker logs pg; exit 1
+
+      # Primeira execução da imagem. O build só provou que ela existe; nada aqui
+      # foi exercitado ainda: o CMD, a expansão de $PORT, o `exec`, o Settings()
+      # no import e o usuário não-root eram todos hipótese.
+      #
+      # -p 8000:8000 não é detalhe: se o uvicorn subisse em 127.0.0.1 em vez de
+      # 0.0.0.0, ele funcionaria DENTRO do container e seria inalcançável de
+      # fora. A publicação da porta é o que torna esse erro visível.
+      #
+      # PORT=8000 exercita a expansão; sem a variável, o default do CMD é o mesmo
+      # valor — então definir explicitamente é o que prova que ela é lida.
+      - name: Sobe a API
+        run: |
+          docker run -d --name api --network flow-ci -p 8000:8000 \
+            -e DATABASE_URL=postgresql+asyncpg://flow:flow@pg:5432/flow_test \
+            -e SUPABASE_JWKS_URL=https://exemplo.invalid/jwks \
+            -e PORT=8000 \
+            flow-api:ci
+
+      # /health faz SELECT 1 — não depende de tabela, então roda contra um banco
+      # vazio. Passar aqui significa: processo vivo, uvicorn escutando na porta
+      # certa, Settings carregado e conexão com o Postgres funcionando.
+      - name: Smoke em /health
+        run: |
+          for _ in $(seq 30); do
+            if curl -fsS http://localhost:8000/health; then
+              echo; echo "API respondeu."; exit 0
+            fi
+            sleep 1
+          done
+          echo "A API não respondeu em 30s."; exit 1
+
+      # Verifica a decisão do Dockerfile, não um efeito colateral dela.
+      - name: Roda como não-root?
+        run: |
+          usuario=$(docker exec api whoami)
+          echo "usuário do processo: $usuario"
+          [ "$usuario" = flow ]
+
+      # Sempre: num smoke que falha, o log do container é a única pista do porquê
+      # — e é justamente quando ele não é impresso por padrão.
+      - name: Logs do container
+        if: always()
+        run: docker logs api
