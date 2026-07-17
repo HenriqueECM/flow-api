@@ -7,14 +7,15 @@ banco vivo, e a estrutura aqui foi derivada do DDL que o próprio SQLAlchemy emi
 para `Base.metadata`. O resultado é o mesmo que o `create_all` produz, que é o
 que os testes já usam.
 
-Em bancos que JÁ têm estas tabelas (o Supabase, criado via sql/schema.sql), não
-rode `upgrade`: use `alembic stamp 0001` para marcá-la como aplicada. O upgrade
-falharia no primeiro CREATE TABLE.
+Confere com produção. A introspecção do banco real (índices `ix_*`, ausência de
+FK para auth.users, ausência de CHECK em `operacao`, defaults só em `id` e
+`created_at`) mostrou que as tabelas nasceram do `create_all`, e não do
+`sql/schema.sql` — que nunca foi executado e por isso foi removido. Logo, banco,
+modelos e esta migration descrevem a mesma estrutura.
 
-Atenção: o schema de produção NÃO é idêntico a esta migration. O sql/schema.sql
-tem uma FK para auth.users, um CHECK em `operacao` e nomes de índice diferentes,
-nenhum deles presente nos modelos. A divergência é anterior a esta migration e
-está documentada; reconciliá-la é assunto de uma revisão própria.
+Em bancos que JÁ têm estas tabelas, não rode `upgrade`: use `alembic stamp 0001`
+para marcá-la como aplicada. O upgrade falharia no primeiro CREATE TABLE. Como a
+migration confere com o banco real, o stamp é uma afirmação verdadeira.
 
 Revision ID: 0001
 Revises:

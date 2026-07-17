@@ -30,7 +30,15 @@ from app.models import Carteira, Provento, Transacao  # noqa: F401
 config = context.config
 
 # Injeta a URL da aplicação por cima do que estiver no .ini (que não a define).
-config.set_main_option("sqlalchemy.url", settings.database_url)
+#
+# O `%%` não é enfeite: o Config do Alembic é um ConfigParser, que interpreta `%`
+# como interpolação. Uma senha URL-encoded (`%40` para `@`, comum na connection
+# string do Supabase) quebra com "invalid interpolation syntax" antes de qualquer
+# conexão. Dobrar o `%` é o escape do ConfigParser, e a leitura via
+# `get_main_option` desfaz o escape — a URL chega intacta ao engine.
+#
+# O CI não pega isto: a URL do container (`flow:flow@localhost`) não tem `%`.
+config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
