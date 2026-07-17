@@ -256,3 +256,63 @@ jobs:
           alembic downgrade base
           alembic upgrade head
           alembic current
+
+  # Aplica as migrations no Supabase, no push de master, ANTES do deploy do
+  # código (Commit 3). É a etapa "migrations" do fluxo PR -> build -> docker ->
+  # migrations -> deploy.
+  #
+  # Roda SOMENTE `alembic upgrade head`: nunca downgrade. Rollback de schema é
+  # decisão manual, fora do pipeline. Se este job falhar, o `deploy` (needs:
+  # migrate-prod) nem começa e producao segue intacta — codigo antigo contra
+  # schema antigo. Nenhuma reversao automatica e disparada em falha.
+  #
+  # A ordem "migrations antes do deploy" abre uma janela em que o codigo ANTIGO
+  # serve contra o schema JA migrado; por isso toda migration precisa ser
+  # retrocompativel (expand/contract). O CI nao impoe isso — e disciplina de
+  # revisao de PR.
+  #
+  # Gated a master + push: nunca roda em develop nem em PR. Fica inerte ate o
+  # secret PROD_DATABASE_URL existir; um push em master antes disso falha aqui
+  # de proposito (sem tocar producao alem do banco), em vez de deployar as cegas.
+  migrate-prod:
+
+    needs: [build, docker, migrations]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+
+    runs-on: ubuntu-latest
+
+    env:
+      # O banco de PRODUCAO (Supabase), via secret. Pooler em session mode (5432),
+      # coerente com o asyncpg — transaction mode (6543) quebraria prepared
+      # statements. Mesmo alvo que o DATABASE_URL do Render.
+      DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+      # Exigida pelo Settings() no import do env.py; uma migration nunca le JWKS,
+      # entao o valor e um placeholder literal — nao ha segredo aqui.
+      SUPABASE_JWKS_URL: https://exemplo.invalid/jwks
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # Só requirements.txt: o alembic vive nele, e nada aqui precisa do harness.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # `current` antes e depois cerca a transicao no log — util para diagnostico
+      # e para conferir, num deploy que falhe adiante, em que revision o banco
+      # ficou. Entre os dois, so `upgrade head`: forward-only, sem downgrade.
+      - name: Migrations em produção (upgrade head)
+        run: |
+          echo "Revision antes:"
+          alembic current
+          alembic upgrade head
+          echo "Revision depois:"
+          alembic current
