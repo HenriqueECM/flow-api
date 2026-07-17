@@ -88,3 +88,30 @@ jobs:
         # sem virar um gate que falha por ruído.
         run: |
           pytest --cov=app --cov-fail-under=93
+
+  # Job separado, e não um step do `build`: não precisa de Postgres, roda em
+  # paralelo, e uma falha aponta direto para o Dockerfile em vez de se misturar
+  # ao resultado dos testes.
+  #
+  # Atenção: `build` é o único check exigido pela branch protection do master.
+  # Este job ainda NÃO é obrigatório — um Dockerfile quebrado passaria pelo
+  # portão. Incluir `docker` nos required checks é decisão à parte.
+  docker:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      # Primeira execução real do Dockerfile e do .dockerignore: nenhum dos dois
+      # é testável sem um daemon Docker, e não há um na máquina de desenvolvimento.
+      # Até aqui, ambos eram só intenção.
+      - name: Build da imagem
+        run: docker build -t flow-api:ci .
+
+      # O tamanho do contexto aparece na linha "transferring context" do build
+      # acima — é a medida que confirma (ou desmente) o .dockerignore. Sem ele
+      # seriam ~299MB, quase todos do .venv.
+      - name: Tamanho da imagem
+        run: docker image ls flow-api:ci
