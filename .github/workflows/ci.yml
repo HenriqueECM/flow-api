@@ -316,3 +316,38 @@ jobs:
           alembic upgrade head
           echo "Revision depois:"
           alembic current
+
+  # Dispara o deploy no Render, DEPOIS que as migrations de producao concluiram.
+  #
+  # needs: [migrate-prod] e uma dependencia explicita e nominal: torna
+  # estruturalmente impossivel deployar sem que o job de migrations em producao
+  # tenha tido sucesso. A semantica do Actions garante isso — job so roda se
+  # todos os `needs` tiverem sucesso, e como nao ha `if: always()`, essa exigencia
+  # permanece. O deploy herda build/docker/migrations transitivamente (via
+  # migrate-prod), sem um caminho paralelo que burle o gate, mesmo que o workflow
+  # seja reorganizado no futuro.
+  #
+  # Fire-and-forget: o Deploy Hook responde 200 na hora e NAO confirma que o
+  # deploy subiu saudavel. Essa validacao e o proximo commit (health check).
+  # autoDeploy segue false no render.yaml: quem orquestra o deploy e este
+  # pipeline, nunca o push observado direto pelo Render.
+  #
+  # Gated a master + push como defesa em profundidade; inerte ate o secret
+  # RENDER_DEPLOY_HOOK_URL existir (um POST para vazio falha o job).
+  deploy:
+
+    needs: [migrate-prod]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+
+    runs-on: ubuntu-latest
+
+    env:
+      # URL secreta gerada no painel do servico no Render. Vem por env (e nao na
+      # linha do curl) para nao vazar no log; o GitHub ainda a mascara.
+      DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+
+    steps:
+      # POST dispara o build+deploy no Render. -f faz o curl (e o job) falharem
+      # se o hook responder erro; -sS esconde o progresso mas mostra o erro.
+      - name: Disparar o Deploy Hook do Render
+        run: curl -fsS -X POST "$DEPLOY_HOOK"
