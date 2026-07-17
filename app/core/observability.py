@@ -21,10 +21,14 @@ import time
 import uuid
 from contextvars import ContextVar
 
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+
 from app.core.config import settings
 
 logger = logging.getLogger("flow.observability")
 access_logger = logging.getLogger("flow.access")
+error_logger = logging.getLogger("flow.error")
 
 # request_id da requisição corrente. Default "-" fora de um request (ex.: logs
 # de startup), para o campo existir sempre sem quebrar.
@@ -43,7 +47,10 @@ class RequestIdFilter(logging.Filter):
     """Injeta o request_id do ContextVar em cada LogRecord."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        record.request_id = request_id_var.get()
+        # Não sobrescreve um request_id posto via `extra` (ex.: o handler de erro,
+        # que roda com o ContextVar já resetado e lê do request.state).
+        if not hasattr(record, "request_id"):
+            record.request_id = request_id_var.get()
         return True
 
 
@@ -133,6 +140,9 @@ class RequestIdMiddleware:
         cabecalhos = dict(scope.get("headers") or [])
         entrada = cabecalhos.get(b"x-request-id")
         request_id = entrada.decode("latin-1") if entrada else uuid.uuid4().hex
+        # Guarda no state para o handler de erro (que roda fora deste middleware,
+        # com o ContextVar já resetado) poder ler via request.state.request_id.
+        scope.setdefault("state", {})["request_id"] = request_id
         token = request_id_var.set(request_id)
 
         status = {"code": 500}  # default se a resposta nunca iniciar (exceção crua)
@@ -166,6 +176,35 @@ class RequestIdMiddleware:
                     },
                 )
             request_id_var.reset(token)
+
+
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Handler global: toda exceção não tratada vira um 500 padronizado.
+
+    Loga em ERROR com traceback, request_id (lido do request.state, já que o
+    ContextVar foi resetado pelo middleware) e o endpoint. Não vaza o detalhe
+    interno ao cliente. `capture_exception` é o ponto de integração do Sentry.
+    """
+    request_id = getattr(request.state, "request_id", "-")
+    error_logger.error(
+        "Erro não tratado em %s %s",
+        request.method,
+        request.url.path,
+        exc_info=exc,
+        extra={
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+        },
+    )
+    capture_exception(exc)
+    return JSONResponse(status_code=500, content={"detail": "Erro interno."})
+
+
+def capture_exception(exc: BaseException) -> None:
+    # Ponto único de captura para o Sentry: quando o SDK entrar,
+    # `sentry_sdk.capture_exception(exc)` vai aqui. No-op por ora.
+    return
 
 
 def init_observability() -> None:
