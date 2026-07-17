@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.db import Base, engine
+from app.core.observability import init_observability
 from app.routers import (
     carteiras,
     health,
@@ -18,8 +19,11 @@ from app.routers import (
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    # Logging estruturado e Sentry (stub) antes de qualquer trabalho, para que os
+    # logs do startup em diante já saiam em JSON.
+    init_observability()
     # Em desenvolvimento, cria as tabelas automaticamente. Em produção, use
-    # migrations (Alembic) ou rode sql/schema.sql no Supabase.
+    # migrations (Alembic).
     if settings.dev_create_tables:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
