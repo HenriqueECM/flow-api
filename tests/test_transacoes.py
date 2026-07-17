@@ -258,7 +258,10 @@ async def test_payload_invalido_e_recusado_sem_persistir(
     assert await db_session.scalar(select(func.count()).select_from(Transacao)) == 0
 
 
-@pytest.mark.parametrize("operacao", ["xpto", "COMPRA", "Compra", "", "transferencia"])
+# Todos cabem em String(10): um valor mais longo seria recusado pelo tamanho da
+# coluna (DataError) antes de o CHECK ser avaliado, e o teste passaria pelo
+# motivo errado.
+@pytest.mark.parametrize("operacao", ["xpto", "COMPRA", "Compra", "", "doacao"])
 async def test_banco_recusa_operacao_fora_de_compra_venda(
     usuario_autenticado, db_session, operacao
 ):
