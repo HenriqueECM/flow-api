@@ -1,7 +1,11 @@
 # Blueprint do Render (https://render.com/docs/blueprint-spec).
 #
-# Declara o serviço; NÃO liga deploy automático nem executa migrations. As duas
-# coisas entram em commits próprios, depois que este for aplicado e validado.
+# Declara o serviço. O deploy NÃO é do Render: quem orquestra é o GitHub Actions
+# (job `deploy`), que dispara este serviço por Deploy Hook depois de rodar as
+# migrations em produção (job `migrate-prod`) e valida a saúde publicada (job
+# `health-check`). Por isso `autoDeploy` fica `false` — ver o bloco lá embaixo.
+# As migrations tampouco rodam no boot do container: o CMD do Dockerfile só sobe
+# o Uvicorn, e o `alembic upgrade head` acontece no pipeline, antes do deploy.
 #
 # Nenhum valor secreto aqui: este arquivo é versionado e o repositório é público.
 # As variáveis sensíveis usam `sync: false`, que diz ao Render "o valor vive no
@@ -43,9 +47,12 @@ services:
     # decidir reinício.
     healthCheckPath: /health
 
-    # Desligado de propósito nesta etapa: o deploy ainda é manual, pelo painel.
-    # Automatizá-lo antes de as migrations rodarem no pipeline colocaria código
-    # novo contra schema velho.
+    # Desligado de propósito: quem deploya é o pipeline, não o Render. O job
+    # `deploy` do GitHub Actions dispara este serviço por Deploy Hook, e só
+    # DEPOIS que o `migrate-prod` aplicou as migrations. Se `autoDeploy` fosse
+    # `true`, o Render subiria código novo por conta própria no push, correndo
+    # contra (e possivelmente à frente de) as migrations — código novo contra
+    # schema velho. Manter `false` é o que garante a ordem migrations → deploy.
     autoDeploy: false
 
     envVars:
