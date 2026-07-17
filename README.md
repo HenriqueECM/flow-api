@@ -66,15 +66,21 @@ A URL vem de `DATABASE_URL` (a mesma da aplicação), não do `alembic.ini` — 
 o Alembic age sobre o banco que a variável apontar. Confira antes de rodar contra
 produção.
 
-### Dependências de infraestrutura não cobertas pelas migrations
+### Dependências do Supabase
 
-Estas dependem do Supabase e **não estão** nas migrations, porque o schema `auth`
-não existe num Postgres limpo e quebraria os testes:
+**FK `carteiras.user_id → auth.users(id) ON DELETE CASCADE`** — criada pela
+migration `0004`, que é **condicional**: só age onde a tabela `auth.users`
+existe. Num Postgres limpo (o CI) ela não faz nada, porque o `create_all` do
+harness não tem como criar o schema `auth`.
 
-- **FK `carteiras.user_id → auth.users(id) ON DELETE CASCADE`** — não existe no
-  banco atual. Consequência: apagar um usuário no Supabase **não remove** as
-  carteiras, transações e proventos dele; os dados ficam órfãos. Pendente de
-  decisão.
+Duas consequências que valem saber:
+
+- **O CI não prova essa FK.** Lá a migration apenas se abstém. A verificação é
+  por introspecção depois de aplicar em produção.
+- **A FK não está em `app/models.py`**, pelo mesmo motivo — o `create_all` a
+  criaria e falharia. `alembic/env.py` protege essa divergência com o filtro
+  `include_object`: sem ele, o próximo `--autogenerate` proporia removê-la.
+  Ao adicionar outro objeto que exista só no Supabase, inclua-o naquele filtro.
 
 ### Histórico
 

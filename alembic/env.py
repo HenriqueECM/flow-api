@@ -45,6 +45,19 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+# Objetos que existem no banco de propósito e NÃO estão nos modelos. Sem este
+# filtro, o autogenerate os veria como "sobrando" e proporia removê-los.
+#
+# A FK para auth.users (0004) é o caso: ela não pode ir para models.py porque o
+# `create_all` do harness a criaria contra um Postgres sem o schema `auth`, e o
+# CI quebraria. Filtrar por nome (e não por heurística de schema) para o filtro
+# não engolir, sem querer, uma remoção legítima de outra constraint.
+OBJETOS_FORA_DOS_MODELOS = {"fk_carteiras_user_id_auth_users"}
+
+
+def include_object(objeto, nome, tipo, refletido, comparar_com) -> bool:
+    return nome not in OBJETOS_FORA_DOS_MODELOS
+
 
 def run_migrations_offline() -> None:
     """Gera o SQL sem conectar (`alembic upgrade head --sql`).
@@ -70,6 +83,7 @@ def do_run_migrations(connection: Connection) -> None:
         # String(40)) e a migration sai incompleta em silêncio.
         compare_type=True,
         compare_server_default=True,
+        include_object=include_object,
     )
 
     with context.begin_transaction():
