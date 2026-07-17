@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -87,6 +88,20 @@ class Transacao(Base):
     fonte: Mapped[str] = mapped_column(String(40), default="Manual")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        # Última linha de defesa da regra que o sistema inteiro pressupõe. O
+        # motor de posição faz `if operacao == "compra" ... else venda`: um
+        # terceiro valor não daria erro, viraria VENDA e corromperia o cálculo
+        # de posição e PM em silêncio.
+        #
+        # Hoje quem barra é só o Literal do Pydantic, na borda — nada protege
+        # contra INSERT por SQL, script de importação ou um endpoint futuro que
+        # não passe pelo schema.
+        CheckConstraint(
+            "operacao in ('compra', 'venda')", name="ck_transacoes_operacao"
+        ),
     )
 
     carteira: Mapped[Carteira] = relationship(back_populates="transacoes")

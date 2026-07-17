@@ -9,6 +9,10 @@ Duas fronteiras distintas são testadas: a de usuário (carteira alheia → 404)
 de carteira (duas carteiras do MESMO usuário não podem misturar transações).
 A segunda não é coberta pelo `get_owned_carteira` — ele valida posse, não
 escopo — e é a que produziria um PM errado silenciosamente.
+
+`operacao` é validada em duas camadas, e as duas são testadas: o Literal do
+Pydantic recusa na borda (422), e o CHECK do banco recusa o que chegar por
+qualquer outro caminho.
 """
 
 from datetime import date
@@ -17,6 +21,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from app.models import Carteira, Transacao
 
@@ -251,3 +256,56 @@ async def test_payload_invalido_e_recusado_sem_persistir(
 
     assert resposta.status_code == 422, resposta.text
     assert await db_session.scalar(select(func.count()).select_from(Transacao)) == 0
+
+
+@pytest.mark.parametrize("operacao", ["xpto", "COMPRA", "Compra", "", "transferencia"])
+async def test_banco_recusa_operacao_fora_de_compra_venda(
+    usuario_autenticado, db_session, operacao
+):
+    # Sem passar pelo Pydantic — é o caminho que um script de importação, um
+    # INSERT manual ou um endpoint futuro tomaria. O motor de posição faz
+    # `if operacao == "compra" ... else venda`: qualquer um destes viraria VENDA
+    # e corromperia o PM em silêncio. O CHECK é a última linha de defesa.
+    #
+    # "COMPRA" e "Compra" entram de propósito: a comparação do motor é
+    # case-sensitive, então maiúsculas são tão perigosas quanto um valor
+    # inventado.
+    carteira_id = await _carteira(db_session, usuario_autenticado.id)
+    db_session.add(
+        Transacao(
+            carteira_id=carteira_id,
+            ticker="PETR4",
+            operacao=operacao,
+            quantidade=Decimal("100"),
+            preco_unit=Decimal("10"),
+            data=date(2024, 1, 10),
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+
+    await db_session.rollback()
+
+
+@pytest.mark.parametrize("operacao", ["compra", "venda"])
+async def test_banco_aceita_os_dois_valores_validos(
+    usuario_autenticado, db_session, operacao
+):
+    # O contrapeso do teste acima: o CHECK precisa barrar o inválido sem
+    # estorvar o válido.
+    carteira_id = await _carteira(db_session, usuario_autenticado.id)
+    db_session.add(
+        Transacao(
+            carteira_id=carteira_id,
+            ticker="PETR4",
+            operacao=operacao,
+            quantidade=Decimal("100"),
+            preco_unit=Decimal("10"),
+            data=date(2024, 1, 10),
+        )
+    )
+    await db_session.commit()
+
+    gravada = await db_session.scalar(select(Transacao.operacao))
+    assert gravada == operacao
