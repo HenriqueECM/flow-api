@@ -383,9 +383,11 @@ jobs:
     timeout-minutes: 15
 
     env:
-      # URL publica do servico no Render. Nao e segredo — por isso variavel, e
-      # nao secret. Vazia (nao configurada) => o curl falha => job falha (inerte).
-      BASE_URL: ${{ secrets.PROD_BASE_URL }}
+      # URL publica do servico no Render. Nao e segredo — por isso variavel
+      # (vars), e nao secret: como variavel ela aparece legivel no log, o que
+      # ajuda a diagnosticar um health-check vermelho; como secret, viria
+      # mascarada (***). Vazia (nao configurada) => o curl falha => job falha.
+      BASE_URL: ${{ vars.PROD_BASE_URL }}
 
     steps:
       # Fase 1 — liveness. Espera o /health responder 200, absorvendo o build da
