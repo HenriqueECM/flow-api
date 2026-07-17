@@ -4,21 +4,25 @@
 que na leitura: um erro não vaza dados, apaga os de outra pessoa — junto com
 todas as transações e proventos dela, por cascade.
 
-Qual cascade este arquivo prova: o do **ORM**. O cascade está declarado nos dois
-lados — `cascade="all, delete-orphan"` nos relationships e `ondelete="CASCADE"`
-na FK —, mas o endpoint faz `await db.delete(carteira)`, que carrega as coleções
-filhas e emite um DELETE para cada linha. O `ON DELETE CASCADE` do Postgres não
-chega a ser exercitado: quando o DELETE da carteira é emitido, os filhos já
-foram removidos pelo ORM. Os dois podem divergir sem que nada aqui perceba — um
-`DELETE FROM carteiras` em SQL puro dependeria do cascade do banco, que estes
-testes não cobrem.
+Qual cascade este arquivo prova: o do **banco**. O `passive_deletes=True` nos
+relationships faz o ORM se abster — ele emite um único `DELETE FROM carteiras` e
+o `ON DELETE CASCADE` da FK remove os filhos.
+
+Isso importa porque é o mesmo mecanismo do caminho que não passa por Python:
+desde a migration 0004, apagar um usuário no Supabase cascateia por
+`auth.users → carteiras → transacoes/proventos` sem nenhum código nosso rodando.
+Testar o cascade do ORM provaria o mecanismo errado.
+
+`test_delete_delega_o_cascade_ao_banco` verifica isso diretamente, olhando o SQL
+emitido — os demais verificam o efeito.
 """
 
 from datetime import date
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+import pytest
+from sqlalchemy import event, func, select
 
 from app.models import Carteira, Provento, Transacao
 
@@ -33,6 +37,24 @@ OUTRO_USER_ID = UUID("00000000-0000-0000-0000-0000000000bb")
 async def _total(db_session, modelo) -> int:
     """Linhas na tabela, lidas do banco — não do identity map da sessão."""
     return await db_session.scalar(select(func.count()).select_from(modelo))
+
+
+@pytest.fixture
+def sql_emitido(engine):
+    """Captura os statements que chegam ao Postgres.
+
+    É a única forma de distinguir "o ORM apagou os filhos" de "o banco apagou os
+    filhos": os dois produzem o mesmo estado final, e nenhuma asserção sobre
+    dados consegue separá-los.
+    """
+    statements: list[str] = []
+
+    def _capturar(conn, cursor, statement, params, context, executemany):
+        statements.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", _capturar)
+    yield statements
+    event.remove(engine.sync_engine, "before_cursor_execute", _capturar)
 
 
 async def test_usuario_remove_a_propria_carteira(
@@ -137,3 +159,68 @@ async def test_remover_carteira_remove_transacoes_e_proventos(
     assert await _total(db_session, Carteira) == 0
     assert await _total(db_session, Transacao) == 0
     assert await _total(db_session, Provento) == 0
+
+
+async def test_delete_delega_o_cascade_ao_banco(
+    client, usuario_autenticado, db_session, override_get_db, sql_emitido
+):
+    """Prova o mecanismo, não o efeito.
+
+    O teste acima ficaria verde tanto se o ORM apagasse os filhos linha a linha
+    quanto se o banco os apagasse — o estado final é idêntico. Este separa os
+    dois olhando o SQL que chegou ao Postgres.
+
+    Importa porque o cascade do banco é o que roda no caminho sem Python:
+    apagar um usuário no Supabase cascateia por auth.users → carteiras → filhos
+    (migration 0004). Se o ORM apagasse os filhos aqui, os testes cobririam um
+    mecanismo que produção não usa nesse fluxo.
+    """
+    carteira = Carteira(user_id=usuario_autenticado.id, nome=NOME_PROPRIO)
+    db_session.add(carteira)
+    await db_session.commit()
+    carteira_id = carteira.id
+
+    db_session.add_all(
+        [
+            Transacao(
+                carteira_id=carteira_id,
+                ticker="PETR4",
+                operacao="compra",
+                quantidade=Decimal("100"),
+                preco_unit=Decimal("30.00"),
+                data=date(2024, 1, 10),
+            ),
+            Transacao(
+                carteira_id=carteira_id,
+                ticker="VALE3",
+                operacao="compra",
+                quantidade=Decimal("50"),
+                preco_unit=Decimal("60.00"),
+                data=date(2024, 2, 10),
+            ),
+        ]
+    )
+    await db_session.commit()
+    sql_emitido.clear()  # só interessa o que a requisição emite
+
+    resposta = await client.delete(f"/carteiras/{carteira_id}")
+
+    assert resposta.status_code == 204, resposta.text
+
+    deletes = [s for s in sql_emitido if s.lstrip().upper().startswith("DELETE")]
+    # Um único DELETE, e na tabela pai: os filhos somem por conta do banco.
+    assert len(deletes) == 1, deletes
+    assert "carteiras" in deletes[0]
+    assert not any("transacoes" in d for d in deletes), deletes
+
+    # E o ORM não carregou as transações para decidir isso (era o que o
+    # passive_deletes evitava): nenhum SELECT em transacoes na requisição.
+    selects_filhos = [
+        s
+        for s in sql_emitido
+        if s.lstrip().upper().startswith("SELECT") and "transacoes" in s
+    ]
+    assert selects_filhos == [], selects_filhos
+
+    # O efeito continua o mesmo — quem o produziu é que mudou.
+    assert await _total(db_session, Transacao) == 0

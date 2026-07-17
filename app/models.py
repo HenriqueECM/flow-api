@@ -58,11 +58,24 @@ class Carteira(Base):
         ),
     )
 
+    # `passive_deletes=True`: quem apaga os filhos é o ON DELETE CASCADE da FK,
+    # não o ORM. Sem isto, `session.delete(carteira)` carregaria toda transação e
+    # provento na memória para emitir um DELETE por linha — e o banco faria o
+    # mesmo trabalho de novo.
+    #
+    # Não é só desempenho: desde a 0004, apagar um usuário no Supabase cascateia
+    # por auth.users → carteiras → filhos sem nenhum Python no caminho. O cascade
+    # do banco já é a fonte de verdade; o do ORM era uma segunda implementação da
+    # mesma regra, que podia divergir sem ninguém notar.
+    #
+    # `delete-orphan` fica: ele trata o outro caso — remover um item da coleção
+    # em memória —, que o ON DELETE não cobre. Sem nenhum cascade, o SQLAlchemy
+    # tentaria anular `carteira_id` (NOT NULL) e estouraria.
     transacoes: Mapped[list["Transacao"]] = relationship(
-        back_populates="carteira", cascade="all, delete-orphan"
+        back_populates="carteira", cascade="all, delete-orphan", passive_deletes=True
     )
     proventos: Mapped[list["Provento"]] = relationship(
-        back_populates="carteira", cascade="all, delete-orphan"
+        back_populates="carteira", cascade="all, delete-orphan", passive_deletes=True
     )
 
 
