@@ -2,7 +2,17 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, func, text
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -18,8 +28,33 @@ class Carteira(Base):
     # Dono da carteira (auth.users.id do Supabase).
     user_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), index=True)
     nome: Mapped[str] = mapped_column(String(120))
+    # A carteira que /ativa devolve. `server_default` (e não `default=`, como as
+    # demais colunas): quem grava aqui também é a migration, ao adicionar a
+    # coluna nas linhas que já existem.
+    is_default: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        # No máximo uma padrão por usuário — a regra fica no banco, não na
+        # aplicação, e por isso vale mesmo com várias instâncias da API.
+        #
+        # Índice PARCIAL: o `WHERE is_default` restringe a unicidade às linhas
+        # verdadeiras. Um UNIQUE(user_id, is_default) permitiria só uma carteira
+        # NÃO-padrão por usuário — o oposto do que queremos.
+        #
+        # Fica no modelo (e não só na migration) porque o harness cria o schema
+        # de teste com `create_all`: sem isto, a constraint não existiria nos
+        # testes e o tratamento de conflito nunca seria exercitado.
+        Index(
+            "uq_carteiras_padrao_por_usuario",
+            "user_id",
+            unique=True,
+            postgresql_where=text("is_default"),
+        ),
     )
 
     transacoes: Mapped[list["Transacao"]] = relationship(
