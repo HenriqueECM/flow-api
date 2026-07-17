@@ -351,3 +351,71 @@ jobs:
       # se o hook responder erro; -sS esconde o progresso mas mostra o erro.
       - name: Disparar o Deploy Hook do Render
         run: curl -fsS -X POST "$DEPLOY_HOOK"
+
+  # Valida que a aplicacao publicada respondeu saudavel, DEPOIS do deploy.
+  #
+  # needs: [deploy] — so roda se o disparo do deploy nao falhou. Como o hook e
+  # fire-and-forget e nao usamos a Render API, a UNICA fonte de sinal e o
+  # endpoint publico: nao ha status de deploy para consultar. A distincao
+  # "deploy em andamento" x "deploy falhou" e feita por TEMPO — enquanto o
+  # orcamento de espera nao esgota, erro de conexao / 5xx / 4xx sao tratados como
+  # "ainda construindo" e a sonda insiste; so apos o orcamento esgotar sem uma
+  # unica resposta saudavel o job declara falha. Isso evita falso negativo
+  # durante o build da imagem no Render Free.
+  #
+  # Limite conhecido: o Render mantem a versao anterior no ar durante o build,
+  # entao num deploy que nao seja o primeiro o /health pode responder 200 da
+  # instancia ANTIGA. Este job prova "a URL publica esta saudavel", nao "a nova
+  # imagem esta no ar" — fechar isso exigiria a Render API ou um marcador de
+  # versao, ambos fora do escopo atual.
+  #
+  # Gated a master + push; inerte ate a variavel PROD_BASE_URL existir.
+  health-check:
+
+    needs: [deploy]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+
+    runs-on: ubuntu-latest
+
+    # Teto rigido do job, acima do orcamento dos lacos (~11min). So age se algo
+    # travar (curl preso, runner lento); no caminho normal a mensagem de
+    # diagnostico dos proprios steps vale antes.
+    timeout-minutes: 15
+
+    env:
+      # URL publica do servico no Render. Nao e segredo — por isso variavel, e
+      # nao secret. Vazia (nao configurada) => o curl falha => job falha (inerte).
+      BASE_URL: ${{ vars.PROD_BASE_URL }}
+
+    steps:
+      # Fase 1 — liveness. Espera o /health responder 200, absorvendo o build da
+      # imagem + cold start do Render Free. 40 tentativas x 15s = ~10min de
+      # orcamento; cada curl tem --max-time 10 para nao pendurar.
+      - name: Aguardar liveness (/health)
+        run: |
+          for tentativa in $(seq 40); do
+            if curl -fsS --max-time 10 "$BASE_URL/health" >/dev/null; then
+              echo "Liveness OK na tentativa $tentativa."
+              exit 0
+            fi
+            echo "Tentativa $tentativa/40: deploy ainda em andamento; aguardando 15s..."
+            sleep 15
+          done
+          echo "Liveness nao respondeu em ~10min: deploy considerado falho."
+          exit 1
+
+      # Fase 2 — readiness. Com o processo vivo, o banco pode levar alguns
+      # segundos. Retry curto (6 x 10s = ~1min): se o /health/ready insistir em
+      # 503 depois disso, e problema real de conectividade, nao warm-up.
+      - name: Aguardar readiness (/health/ready)
+        run: |
+          for tentativa in $(seq 6); do
+            if curl -fsS --max-time 10 "$BASE_URL/health/ready" >/dev/null; then
+              echo "Readiness OK na tentativa $tentativa."
+              exit 0
+            fi
+            echo "Tentativa $tentativa/6: banco ainda nao pronto; aguardando 10s..."
+            sleep 10
+          done
+          echo "Readiness nao respondeu 200 em ~1min apos o liveness: banco inacessivel."
+          exit 1
