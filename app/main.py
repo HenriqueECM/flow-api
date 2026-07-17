@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.db import Base, engine
-from app.core.observability import init_observability
+from app.core.observability import RequestIdMiddleware, init_observability
 from app.routers import (
     carteiras,
     health,
@@ -39,6 +39,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Por último = mais externo: envolve CORS, autenticação, routers e erros, então
+# todo request ganha request_id e access log (add_middleware empilha ao contrário).
+app.add_middleware(RequestIdMiddleware)
 
 app.include_router(health.router)
 app.include_router(carteiras.router)

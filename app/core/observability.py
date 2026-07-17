@@ -1,26 +1,54 @@
-"""Observabilidade: logging estruturado (JSON) e ponto de entrada do Sentry.
+"""Observabilidade: logging estruturado (JSON), correlação por request e Sentry.
 
 Logs em JSON porque é o que o Render e um log drain (Better Stack/Logtail)
 ingerem e indexam — texto solto não é pesquisável. O stdout estruturado **é** a
 integração com o Better Stack: via log drain, sem código.
 
+Correlação: `RequestIdMiddleware` (ASGI puro) põe um `request_id` num ContextVar,
+e `RequestIdFilter` o injeta em **todo** LogRecord — inclusive os ad-hoc
+(`flow.brapi`, `flow.posicoes`). ASGI puro (e não BaseHTTPMiddleware) porque só
+assim o ContextVar propaga de forma confiável para o task do endpoint.
+
 `init_observability()` roda no startup (lifespan). O Sentry ainda não é
-dependência do projeto; `_init_sentry()` é um stub acionado por `SENTRY_DSN`,
-pronto para virar drop-in quando o SDK entrar.
+dependência do projeto; `_init_sentry()` é um stub acionado por `SENTRY_DSN`.
 """
 
 import datetime
 import json
 import logging
 import logging.config
+import time
+import uuid
+from contextvars import ContextVar
 
 from app.core.config import settings
 
 logger = logging.getLogger("flow.observability")
+access_logger = logging.getLogger("flow.access")
+
+# request_id da requisição corrente. Default "-" fora de um request (ex.: logs
+# de startup), para o campo existir sempre sem quebrar.
+request_id_var: ContextVar[str] = ContextVar("request_id", default="-")
+
+# Atributos padrão de um LogRecord — tudo que NÃO estiver aqui é "extra" (passado
+# via `extra=`, como request_id/method/path/status/duration_ms) e vai para o JSON.
+_STD_ATTRS = set(logging.LogRecord("", 0, "", 0, "", (), None).__dict__) | {
+    "message",
+    "asctime",
+    "taskName",
+}
+
+
+class RequestIdFilter(logging.Filter):
+    """Injeta o request_id do ContextVar em cada LogRecord."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = request_id_var.get()
+        return True
 
 
 class JsonFormatter(logging.Formatter):
-    """Serializa cada LogRecord como uma linha JSON."""
+    """Serializa cada LogRecord como uma linha JSON, com os campos extra."""
 
     def format(self, record: logging.LogRecord) -> str:
         dados = {
@@ -31,38 +59,113 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
+        # Campos extra (request_id, duration_ms, method, path, status, ...).
+        for chave, valor in record.__dict__.items():
+            if chave not in _STD_ATTRS and not chave.startswith("_"):
+                dados[chave] = valor
         # exc_info só existe em log de exceção; fora disso, não polui a linha.
         if record.exc_info:
             dados["exc"] = self.formatException(record.exc_info)
-        return json.dumps(dados, ensure_ascii=False)
+        return json.dumps(dados, ensure_ascii=False, default=str)
 
 
 def configure_logging(level: str) -> None:
-    """Instala o formatter JSON no root e unifica os loggers do uvicorn.
+    """Instala o formatter JSON no root, injeta o request_id e ajusta o uvicorn.
 
     `disable_existing_loggers=False` para não silenciar os loggers `flow.*` já
-    criados no import dos módulos (brapi, posicoes). Os do uvicorn recebem o
-    mesmo handler e param de propagar, para não logar em dobro no root.
+    criados no import dos módulos. `uvicorn.access` é desligado: quem faz o access
+    log é o nosso middleware (JSON, com request_id e duração). `uvicorn.error`
+    segue ativo.
     """
     logging.config.dictConfig(
         {
             "version": 1,
             "disable_existing_loggers": False,
+            "filters": {"request_id": {"()": "app.core.observability.RequestIdFilter"}},
             "formatters": {"json": {"()": "app.core.observability.JsonFormatter"}},
             "handlers": {
                 "stdout": {
                     "class": "logging.StreamHandler",
                     "stream": "ext://sys.stdout",
                     "formatter": "json",
+                    "filters": ["request_id"],
                 }
             },
             "root": {"handlers": ["stdout"], "level": level},
             "loggers": {
-                nome: {"handlers": ["stdout"], "level": level, "propagate": False}
-                for nome in ("uvicorn", "uvicorn.error", "uvicorn.access")
+                "uvicorn": {"handlers": ["stdout"], "level": level, "propagate": False},
+                "uvicorn.error": {
+                    "handlers": ["stdout"],
+                    "level": level,
+                    "propagate": False,
+                },
+                # Desligado: substituído pelo nosso access log.
+                "uvicorn.access": {
+                    "handlers": [],
+                    "level": "WARNING",
+                    "propagate": False,
+                },
             },
         }
     )
+
+
+class RequestIdMiddleware:
+    """Middleware ASGI puro: correlaciona cada request e emite o access log.
+
+    ASGI puro (não BaseHTTPMiddleware) para o ContextVar setado aqui propagar de
+    forma confiável ao task do endpoint — assim os logs internos carregam o mesmo
+    request_id. Adicionado por último em main.py para ser o mais externo.
+    """
+
+    # Health check do Render bate nesses o tempo todo; logá-los inundaria o log.
+    # Continuam ganhando o header X-Request-ID, só não geram linha de access.
+    SEM_ACCESS_LOG = frozenset({"/health", "/health/ready"})
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        cabecalhos = dict(scope.get("headers") or [])
+        entrada = cabecalhos.get(b"x-request-id")
+        request_id = entrada.decode("latin-1") if entrada else uuid.uuid4().hex
+        token = request_id_var.set(request_id)
+
+        status = {"code": 500}  # default se a resposta nunca iniciar (exceção crua)
+
+        async def send_wrapper(message) -> None:
+            if message["type"] == "http.response.start":
+                status["code"] = message["status"]
+                message.setdefault("headers", []).append(
+                    (b"x-request-id", request_id.encode("latin-1"))
+                )
+            await send(message)
+
+        inicio = time.perf_counter()
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            caminho = scope.get("path", "")
+            if caminho not in self.SEM_ACCESS_LOG:
+                duracao_ms = round((time.perf_counter() - inicio) * 1000, 1)
+                metodo = scope.get("method", "-")
+                access_logger.info(
+                    "%s %s %s",
+                    metodo,
+                    caminho,
+                    status["code"],
+                    extra={
+                        "method": metodo,
+                        "path": caminho,
+                        "status": status["code"],
+                        "duration_ms": duracao_ms,
+                    },
+                )
+            request_id_var.reset(token)
 
 
 def init_observability() -> None:
