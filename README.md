@@ -110,9 +110,11 @@ docker run --rm --name api --network flow-local -p 8000:8000 \
 ```
 
 O banco sobe vazio: aplique as migrations antes de usar os endpoints. (`/health`
-funciona sem elas, porque só faz `SELECT 1` — é por isso que ele serve de smoke
-test no CI.) O `docker exec` herda as variáveis do `docker run`, então não é
-preciso repetir a `DATABASE_URL`:
+funciona sem elas, e sem banco algum, porque é liveness puro — não toca no
+Postgres. É por isso que ele serve de smoke test de liveness no CI; a
+conectividade com o banco é validada à parte, por `/health/ready`.) O
+`docker exec` herda as variáveis do `docker run`, então não é preciso repetir a
+`DATABASE_URL`:
 
 ```bash
 docker exec api alembic upgrade head
@@ -185,7 +187,8 @@ que ele prometia continuam ausentes do banco e estão registradas acima.
 ## Endpoints (v0.1)
 | Método | Rota                                        | Descrição                     |
 |--------|---------------------------------------------|-------------------------------|
-| GET    | `/health`                                   | status + ping no banco        |
+| GET    | `/health`                                   | liveness (não toca no banco)  |
+| GET    | `/health/ready`                             | readiness: 200 se o banco responde, 503 se não |
 | GET    | `/carteiras`                                | lista carteiras do usuário    |
 | POST   | `/carteiras`                                | cria carteira                 |
 | GET    | `/carteiras/{id}`                           | detalhe                       |
@@ -196,7 +199,7 @@ que ele prometia continuam ausentes do banco e estão registradas acima.
 | POST   | `/carteiras/{id}/proventos`                 | registra provento             |
 | GET    | `/carteiras/{id}/posicoes`                  | posições consolidadas (PM)    |
 
-Todas as rotas (exceto `/health`) exigem o header
+Todas as rotas (exceto `/health` e `/health/ready`) exigem o header
 `Authorization: Bearer <access_token do Supabase>`.
 
 ## Próximos passos
