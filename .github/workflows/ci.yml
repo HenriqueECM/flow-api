@@ -186,3 +186,73 @@ jobs:
       - name: Logs do container
         if: always()
         run: docker logs api
+
+  # Valida exclusivamente as migrations, isolado dos testes da aplicação: roda
+  # contra um Postgres limpo, sem create_all, sem o harness e sem pytest. Uma
+  # falha aqui aponta para uma migration, nunca para regra de negócio.
+  #
+  # Prova quatro propriedades num único ciclo: aplicar do zero, desfazer tudo,
+  # reaplicar e parar exatamente na revision head. O CI de hoje nunca exercitava
+  # as migrations — usava create_all no harness —, então uma migration quebrada
+  # só apareceria em produção.
+  migrations:
+
+    runs-on: ubuntu-latest
+
+    # Postgres efêmero e exclusivo, como no job `build`, mas aqui ninguém cria
+    # schema por outro caminho: o único a tocar neste banco é o Alembic.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: flow
+          POSTGRES_PASSWORD: flow
+          POSTGRES_DB: flow_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U flow -d flow_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --health-start-period 10s
+
+    env:
+      # Aponta para o Postgres acima. A 0004 é condicional
+      # (to_regclass('auth.users')): contra este banco sem o schema `auth` ela
+      # apenas emite um NOTICE e não faz nada, então o upgrade roda limpo sem um
+      # Supabase. O CI verde, portanto, não prova a FK da 0004 — só que ela
+      # no-opa; essa FK é verificada por introspecção em produção.
+      DATABASE_URL: postgresql+asyncpg://flow:flow@localhost:5432/flow_test
+      # Exigida pelo Settings() no import do env.py (que lê a URL de `settings`);
+      # nunca acessada por uma migration. Domínio inválido de propósito.
+      SUPABASE_JWKS_URL: https://exemplo.invalid/jwks
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # Só requirements.txt: o alembic vive nele (não em -dev). Trazer o
+      # requirements-dev arrastaria pytest e o harness — justamente o isolamento
+      # que este job existe para garantir.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # up → down → up → current: aplicar do zero, desfazer até o banco vazio,
+      # reaplicar e confirmar que parou na head. `upgrade`/`downgrade` saem com
+      # código != 0 se qualquer revision falhar — são eles os gates; o `current`
+      # ao final deixa a revision aplicada registrada no log.
+      - name: Ciclo de migrations (up / down / up)
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
+          alembic current
