@@ -1,0 +1,77 @@
+# Blueprint do Render (https://render.com/docs/blueprint-spec).
+#
+# Declara o serviço; NÃO liga deploy automático nem executa migrations. As duas
+# coisas entram em commits próprios, depois que este for aplicado e validado.
+#
+# Nenhum valor secreto aqui: este arquivo é versionado e o repositório é público.
+# As variáveis sensíveis usam `sync: false`, que diz ao Render "o valor vive no
+# painel; não o sobrescreva a partir do Blueprint". Elas precisam ser preenchidas
+# lá antes do primeiro deploy — `Settings` é instanciado no import da aplicação,
+# então faltando qualquer obrigatória o processo morre antes do Uvicorn subir.
+
+services:
+  - type: web
+    name: flow-api
+    runtime: docker
+
+    # Ohio, e não o padrão do Render (Oregon): o Supabase do projeto está em
+    # us-east-2, e API e banco na mesma região da AWS evitam que toda query
+    # atravesse os Estados Unidos. A conexão é via pooler em session mode
+    # (porta 5432), que o asyncpg suporta — transaction mode (6543) quebraria os
+    # prepared statements.
+    region: ohio
+
+    # Free hiberna após ~15 min sem tráfego e leva ~50s para acordar. É o
+    # comportamento esperado enquanto a fase for validar o pipeline; quando
+    # houver uso real, `starter` remove a hibernação.
+    plan: free
+
+    # Só master. O develop existe para desenvolvimento e CI — não é deployado.
+    branch: master
+
+    # A imagem validada pelo job `docker` do CI, que constrói e sobe o container
+    # a cada push. O Render reconstrói a sua própria a partir do mesmo arquivo.
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+
+    # /health faz SELECT 1. Passar significa: processo vivo, Uvicorn na porta
+    # certa e banco alcançável.
+    #
+    # A contrapartida: o health check depende do Supabase. Uma oscilação de rede
+    # marca a instância como não-saudável e a recicla — um problema de terceiro
+    # vira reinicialização. Separar liveness de readiness resolve, e é assunto de
+    # um commit próprio.
+    healthCheckPath: /health
+
+    # Desligado de propósito nesta etapa: o deploy ainda é manual, pelo painel.
+    # Automatizá-lo antes de as migrations rodarem no pipeline colocaria código
+    # novo contra schema velho.
+    autoDeploy: false
+
+    envVars:
+      # ── Preencher no painel do Render ──────────────────────────────────────
+      # `sync: false` = o Render pede o valor na primeira aplicação do Blueprint
+      # e o mantém no painel, fora do repositório.
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_JWKS_URL
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: BRAPI_TOKEN
+        sync: false
+
+      # Origem do frontend. Precisa ser definida: o default do código é
+      # `http://localhost:3000`, então sem isto a API em produção recusaria, por
+      # CORS, o site de produção.
+      - key: CORS_ORIGINS
+        sync: false
+
+      # ── Fixadas aqui, de propósito ─────────────────────────────────────────
+      # Não é segredo, e o valor seguro tem que ser declarativo em vez de
+      # depender de alguém lembrar de configurá-lo no painel. Com `true`, o
+      # lifespan roda create_all a cada boot: contorna o Alembic e desconhece
+      # objetos que só existem no banco, como a FK para auth.users (migration
+      # 0004).
+      - key: DEV_CREATE_TABLES
+        value: "false"
