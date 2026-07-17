@@ -34,13 +34,13 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
 
-    # /health faz SELECT 1. Passar significa: processo vivo, Uvicorn na porta
-    # certa e banco alcançável.
-    #
-    # A contrapartida: o health check depende do Supabase. Uma oscilação de rede
-    # marca a instância como não-saudável e a recicla — um problema de terceiro
-    # vira reinicialização. Separar liveness de readiness resolve, e é assunto de
-    # um commit próprio.
+    # /health é liveness puro: não toca no banco, responde enquanto o processo
+    # estiver de pé. É de propósito que o health check da plataforma aponte para
+    # cá — assim uma oscilação do Supabase não marca a instância como
+    # não-saudável nem provoca reinício, que não consertaria um Postgres de
+    # terceiro fora do ar. A conectividade com o banco é verificada por
+    # /health/ready (readiness), usado para monitoramento e diagnóstico, não para
+    # decidir reinício.
     healthCheckPath: /health
 
     # Desligado de propósito nesta etapa: o deploy ainda é manual, pelo painel.
