@@ -61,7 +61,9 @@ async def list_proventos(
     result = await db.execute(
         select(Provento)
         .where(Provento.carteira_id == carteira.id)
-        .order_by(Provento.data_pagamento.desc().nullslast(), Provento.created_at.desc())
+        .order_by(
+            Provento.data_pagamento.desc().nullslast(), Provento.created_at.desc()
+        )
     )
     return [_provento_out(p) for p in result.scalars().all()]
 
@@ -89,7 +91,9 @@ async def preview_provento(
 
     transacoes = await _transacoes_do_ticker(db, carteira.id, ticker)
     calc = calcular_campos_provento(
-        transacoes, data_com, valor_por_acao if valor_por_acao is not None else Decimal(0)
+        transacoes,
+        data_com,
+        valor_por_acao if valor_por_acao is not None else Decimal(0),
     )
 
     tem_valor = valor_por_acao is not None

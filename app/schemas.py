@@ -20,6 +20,8 @@ class CarteiraOut(BaseModel):
 
     id: UUID
     nome: str
+    # A que /ativa devolve. Exposta para o front poder marcá-la na lista.
+    is_default: bool
     created_at: datetime
 
 

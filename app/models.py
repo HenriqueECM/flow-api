@@ -2,7 +2,18 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, func, text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -18,15 +29,53 @@ class Carteira(Base):
     # Dono da carteira (auth.users.id do Supabase).
     user_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), index=True)
     nome: Mapped[str] = mapped_column(String(120))
+    # A carteira que /ativa devolve. `server_default` (e não `default=`, como as
+    # demais colunas): quem grava aqui também é a migration, ao adicionar a
+    # coluna nas linhas que já existem.
+    is_default: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
+    __table_args__ = (
+        # No máximo uma padrão por usuário — a regra fica no banco, não na
+        # aplicação, e por isso vale mesmo com várias instâncias da API.
+        #
+        # Índice PARCIAL: o `WHERE is_default` restringe a unicidade às linhas
+        # verdadeiras. Um UNIQUE(user_id, is_default) permitiria só uma carteira
+        # NÃO-padrão por usuário — o oposto do que queremos.
+        #
+        # Fica no modelo (e não só na migration) porque o harness cria o schema
+        # de teste com `create_all`: sem isto, a constraint não existiria nos
+        # testes e o tratamento de conflito nunca seria exercitado.
+        Index(
+            "uq_carteiras_padrao_por_usuario",
+            "user_id",
+            unique=True,
+            postgresql_where=text("is_default"),
+        ),
+    )
+
+    # `passive_deletes=True`: quem apaga os filhos é o ON DELETE CASCADE da FK,
+    # não o ORM. Sem isto, `session.delete(carteira)` carregaria toda transação e
+    # provento na memória para emitir um DELETE por linha — e o banco faria o
+    # mesmo trabalho de novo.
+    #
+    # Não é só desempenho: desde a 0004, apagar um usuário no Supabase cascateia
+    # por auth.users → carteiras → filhos sem nenhum Python no caminho. O cascade
+    # do banco já é a fonte de verdade; o do ORM era uma segunda implementação da
+    # mesma regra, que podia divergir sem ninguém notar.
+    #
+    # `delete-orphan` fica: ele trata o outro caso — remover um item da coleção
+    # em memória —, que o ON DELETE não cobre. Sem nenhum cascade, o SQLAlchemy
+    # tentaria anular `carteira_id` (NOT NULL) e estouraria.
     transacoes: Mapped[list["Transacao"]] = relationship(
-        back_populates="carteira", cascade="all, delete-orphan"
+        back_populates="carteira", cascade="all, delete-orphan", passive_deletes=True
     )
     proventos: Mapped[list["Provento"]] = relationship(
-        back_populates="carteira", cascade="all, delete-orphan"
+        back_populates="carteira", cascade="all, delete-orphan", passive_deletes=True
     )
 
 
@@ -52,6 +101,20 @@ class Transacao(Base):
     fonte: Mapped[str] = mapped_column(String(40), default="Manual")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        # Última linha de defesa da regra que o sistema inteiro pressupõe. O
+        # motor de posição faz `if operacao == "compra" ... else venda`: um
+        # terceiro valor não daria erro, viraria VENDA e corromperia o cálculo
+        # de posição e PM em silêncio.
+        #
+        # Hoje quem barra é só o Literal do Pydantic, na borda — nada protege
+        # contra INSERT por SQL, script de importação ou um endpoint futuro que
+        # não passe pelo schema.
+        CheckConstraint(
+            "operacao in ('compra', 'venda')", name="ck_transacoes_operacao"
+        ),
     )
 
     carteira: Mapped[Carteira] = relationship(back_populates="transacoes")

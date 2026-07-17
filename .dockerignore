@@ -1,0 +1,28 @@
+# O que entra na imagem. Lista de PERMISSÃO, não de exclusão: nega tudo e libera
+# o necessário.
+#
+# É deliberado. Numa lista de exclusão, um arquivo novo na raiz entra na imagem
+# por padrão, e só não entra se alguém lembrar de excluí-lo — foi assim que
+# `.env` com credenciais foi parar em imagem publicada em muito projeto. Aqui o
+# esquecimento erra para o lado seguro: o build quebra por falta de arquivo, em
+# vez de vazar um em silêncio.
+#
+# Este repositório é público e o `.env` da raiz tem a connection string real do
+# Supabase. Ele está coberto pelo `*` abaixo, e não por uma linha própria, para
+# a proteção não depender de alguém não apagar a linha.
+*
+
+# ── O que a aplicação precisa em runtime ─────────────────────────────────────
+!app
+# Migrations: a imagem carrega o Alembic para permitir `upgrade`/`current`
+# manuais contra o banco, mesmo com o upgrade automático rodando fora dela.
+!alembic
+!alembic.ini
+!requirements.txt
+
+# ── Lixo que vive DENTRO do que foi liberado ─────────────────────────────────
+# O `!app` acima traz a pasta inteira; estas linhas tiram o que não deve ir
+# junto. Bytecode compilado no Windows não serve para o Linux da imagem, e
+# reaproveitá-lo produz erros difíceis de ler.
+**/__pycache__
+**/*.py[cod]

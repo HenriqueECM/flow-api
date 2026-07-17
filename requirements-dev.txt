@@ -1,0 +1,29 @@
+-r requirements.txt
+
+# Testa se a máquina funciona.
+pytest==9.1.1
+
+# Um linter é uma ferramenta que analisa seu código sem executá-lo para encontrar problemas.
+# Existe um import que nunca é usado?
+# Existe uma variável criada e nunca utilizada?
+# Os imports estão organizados?
+# Existe código morto?
+# Existe algum erro comum de Python?
+ruff==0.15.21
+
+# Um formatador de código é uma ferramenta que organiza o código de acordo com um padrão.
+black==26.5.1
+
+coverage==7.15.2
+pytest-cov==7.1.0
+pip-audit==2.10.1
+
+# O pytest sozinho não sabe executar `async def` — ele coleta a corrotina e nunca
+# a roda. Este plugin cria o event loop e executa testes/fixtures assíncronos,
+# necessários porque a API é async de ponta a ponta (FastAPI + SQLAlchemy async).
+pytest-asyncio==1.4.0
+
+# Intercepta as chamadas HTTP feitas com httpx (o cliente usado pelo
+# brapi_client) e devolve respostas falsas. Permite testar /posicoes sem
+# depender da brapi.dev estar no ar.
+respx==0.23.1

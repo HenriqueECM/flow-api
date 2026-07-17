@@ -42,9 +42,7 @@ async def _fetch_quotes(tickers: list[str]) -> dict[str, dict]:
             payload = response.json()
     except (httpx.HTTPError, ValueError) as exc:
         # Rede/timeout/JSON inválido: não deixa a aplicação cair.
-        logger.warning(
-            "Falha ao consultar brapi.dev: %s: %s", type(exc).__name__, exc
-        )
+        logger.warning("Falha ao consultar brapi.dev: %s: %s", type(exc).__name__, exc)
         return {}
 
     quotes: dict[str, dict] = {}

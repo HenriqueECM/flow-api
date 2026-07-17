@@ -1,0 +1,421 @@
+name: Backend CI
+
+# `master` é o branch default do repositório; `main` não existe. Enquanto os
+# gatilhos apontavam para `main`, nenhuma execução do Backend CI acontecia em
+# master — nem no push, nem em PR vindo de develop.
+on:
+  push:
+    branches:
+      - master
+      - develop
+
+  pull_request:
+    branches:
+      - master
+      - develop
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    # Postgres efêmero, exclusivo desta execução. Sobe antes do primeiro step e
+    # é destruído junto com o job — os testes nunca falam com o Supabase.
+    services:
+      postgres:
+        # Espelhe aqui a versão major do seu projeto Supabase.
+        # Mínimo: 13 (a partir dela gen_random_uuid() é nativo, sem pgcrypto).
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: flow
+          POSTGRES_PASSWORD: flow
+          POSTGRES_DB: flow_test
+        # Os steps rodam no host do runner (o job não usa `container:`), então o
+        # banco só é alcançável por uma porta publicada em localhost.
+        ports:
+          - 5432:5432
+        # Sem healthcheck, os steps começariam com o Postgres ainda subindo.
+        # O start-period cobre o restart que a imagem faz ao final do init.
+        options: >-
+          --health-cmd "pg_isready -U flow -d flow_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --health-start-period 10s
+
+    env:
+      # Aponta para o container acima. Deliberadamente literal, e não um secret:
+      # a URL de produção não fica disponível no processo que roda os testes.
+      # Credenciais fracas são intencionais — o banco vive minutos, só aceita
+      # conexão de dentro do runner e não contém nada.
+      DATABASE_URL: postgresql+asyncpg://flow:flow@localhost:5432/flow_test
+      # Exigido pelo Settings() no import, mas nunca acessado: get_current_user
+      # é sobrescrito nos testes. Domínio inválido de propósito — se algum teste
+      # exercitar o caminho real do JWKS, ele falha em vez de ir à rede.
+      SUPABASE_JWKS_URL: https://exemplo.invalid/jwks
+
+    steps:
+      # checkout@v4 e setup-python@v5 rodam em Node 20, deprecado nos runners —
+      # o GitHub já os forçava em Node 24 e avisava a cada execução. As versões
+      # abaixo declaram node24 nativamente.
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      
+      - name: Run Ruff
+        run: |
+          ruff check .
+
+      - name: Run Black
+        run: |
+          black --check .
+
+      - name: Run tests with coverage
+        # O piso era 65% de uma métrica que não enxergava a camada async (ver
+        # .coveragerc). Com a medição corrigida e os módulos cobertos, a real é
+        # ~95% — 65% deixaria apagar módulos inteiros de teste em silêncio.
+        # 93% dá ~23 linhas de folga (1% ≈ 9 statements) para variação legítima
+        # sem virar um gate que falha por ruído.
+        run: |
+          pytest --cov=app --cov-fail-under=93
+
+  # Job separado, e não um step do `build`: roda em paralelo e uma falha aponta
+  # direto para a imagem em vez de se misturar ao resultado dos testes.
+  #
+  # Não usa `services:` para o Postgres. Os serviços do Actions sobem no host do
+  # runner, e `localhost` dentro de um container é o próprio container — a API
+  # não os alcançaria. Aqui o Postgres é um container irmão numa rede própria,
+  # endereçável pelo nome.
+  #
+  # `build` e `docker` são os dois checks exigidos pela branch protection do
+  # master: uma imagem quebrada bloqueia o merge.
+  docker:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      # Primeira execução real do Dockerfile e do .dockerignore: nenhum dos dois
+      # é testável sem um daemon Docker, e não há um na máquina de desenvolvimento.
+      # Até aqui, ambos eram só intenção.
+      - name: Build da imagem
+        run: docker build -t flow-api:ci .
+
+      # O tamanho do contexto aparece na linha "transferring context" do build
+      # acima — é a medida que confirma (ou desmente) o .dockerignore. Sem ele
+      # seriam ~299MB, quase todos do .venv.
+      - name: Tamanho da imagem
+        run: docker image ls flow-api:ci
+
+      - name: Sobe o Postgres na rede do teste
+        run: |
+          docker network create flow-ci
+          docker run -d --name pg --network flow-ci \
+            -e POSTGRES_USER=flow \
+            -e POSTGRES_PASSWORD=flow \
+            -e POSTGRES_DB=flow_test \
+            --health-cmd "pg_isready -U flow -d flow_test" \
+            --health-interval 2s \
+            postgres:16-alpine
+          for _ in $(seq 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' pg)" = healthy ] && exit 0
+            sleep 1
+          done
+          echo "Postgres não ficou saudável."; docker logs pg; exit 1
+
+      # Primeira execução da imagem. O build só provou que ela existe; nada aqui
+      # foi exercitado ainda: o CMD, a expansão de $PORT, o `exec`, o Settings()
+      # no import e o usuário não-root eram todos hipótese.
+      #
+      # -p 8000:8000 não é detalhe: se o uvicorn subisse em 127.0.0.1 em vez de
+      # 0.0.0.0, ele funcionaria DENTRO do container e seria inalcançável de
+      # fora. A publicação da porta é o que torna esse erro visível.
+      #
+      # PORT=8000 exercita a expansão; sem a variável, o default do CMD é o mesmo
+      # valor — então definir explicitamente é o que prova que ela é lida.
+      - name: Sobe a API
+        run: |
+          docker run -d --name api --network flow-ci -p 8000:8000 \
+            -e DATABASE_URL=postgresql+asyncpg://flow:flow@pg:5432/flow_test \
+            -e SUPABASE_JWKS_URL=https://exemplo.invalid/jwks \
+            -e PORT=8000 \
+            flow-api:ci
+
+      # /health é liveness: não toca no banco. Passar aqui significa processo
+      # vivo, uvicorn escutando na porta certa e Settings carregado — mas NÃO
+      # prova conectividade com o Postgres. Essa prova é o smoke seguinte.
+      - name: Smoke em /health
+        run: |
+          for _ in $(seq 30); do
+            if curl -fsS http://localhost:8000/health; then
+              echo; echo "API respondeu."; exit 0
+            fi
+            sleep 1
+          done
+          echo "A API não respondeu em 30s."; exit 1
+
+      # /health/ready é readiness: faz SELECT 1 e só responde 200 com o banco
+      # alcançável. É aqui que o pipeline valida, end-to-end e dentro do
+      # container, a conexão com o Postgres. O liveness já respondeu acima, então
+      # basta uma tentativa — se o banco não estivesse de pé, viria 503 e o
+      # `-f` do curl falha o job.
+      - name: Smoke em /health/ready
+        run: curl -fsS http://localhost:8000/health/ready
+
+      # Verifica a decisão do Dockerfile, não um efeito colateral dela.
+      - name: Roda como não-root?
+        run: |
+          usuario=$(docker exec api whoami)
+          echo "usuário do processo: $usuario"
+          [ "$usuario" = flow ]
+
+      # Sempre: num smoke que falha, o log do container é a única pista do porquê
+      # — e é justamente quando ele não é impresso por padrão.
+      - name: Logs do container
+        if: always()
+        run: docker logs api
+
+  # Valida exclusivamente as migrations, isolado dos testes da aplicação: roda
+  # contra um Postgres limpo, sem create_all, sem o harness e sem pytest. Uma
+  # falha aqui aponta para uma migration, nunca para regra de negócio.
+  #
+  # Prova quatro propriedades num único ciclo: aplicar do zero, desfazer tudo,
+  # reaplicar e parar exatamente na revision head. O CI de hoje nunca exercitava
+  # as migrations — usava create_all no harness —, então uma migration quebrada
+  # só apareceria em produção.
+  migrations:
+
+    runs-on: ubuntu-latest
+
+    # Postgres efêmero e exclusivo, como no job `build`, mas aqui ninguém cria
+    # schema por outro caminho: o único a tocar neste banco é o Alembic.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: flow
+          POSTGRES_PASSWORD: flow
+          POSTGRES_DB: flow_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U flow -d flow_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --health-start-period 10s
+
+    env:
+      # Aponta para o Postgres acima. A 0004 é condicional
+      # (to_regclass('auth.users')): contra este banco sem o schema `auth` ela
+      # apenas emite um NOTICE e não faz nada, então o upgrade roda limpo sem um
+      # Supabase. O CI verde, portanto, não prova a FK da 0004 — só que ela
+      # no-opa; essa FK é verificada por introspecção em produção.
+      DATABASE_URL: postgresql+asyncpg://flow:flow@localhost:5432/flow_test
+      # Exigida pelo Settings() no import do env.py (que lê a URL de `settings`);
+      # nunca acessada por uma migration. Domínio inválido de propósito.
+      SUPABASE_JWKS_URL: https://exemplo.invalid/jwks
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # Só requirements.txt: o alembic vive nele (não em -dev). Trazer o
+      # requirements-dev arrastaria pytest e o harness — justamente o isolamento
+      # que este job existe para garantir.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # up → down → up → current: aplicar do zero, desfazer até o banco vazio,
+      # reaplicar e confirmar que parou na head. `upgrade`/`downgrade` saem com
+      # código != 0 se qualquer revision falhar — são eles os gates; o `current`
+      # ao final deixa a revision aplicada registrada no log.
+      - name: Ciclo de migrations (up / down / up)
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
+          alembic current
+
+  # Aplica as migrations no Supabase, no push de master, ANTES do deploy do
+  # código (Commit 3). É a etapa "migrations" do fluxo PR -> build -> docker ->
+  # migrations -> deploy.
+  #
+  # Roda SOMENTE `alembic upgrade head`: nunca downgrade. Rollback de schema é
+  # decisão manual, fora do pipeline. Se este job falhar, o `deploy` (needs:
+  # migrate-prod) nem começa e producao segue intacta — codigo antigo contra
+  # schema antigo. Nenhuma reversao automatica e disparada em falha.
+  #
+  # A ordem "migrations antes do deploy" abre uma janela em que o codigo ANTIGO
+  # serve contra o schema JA migrado; por isso toda migration precisa ser
+  # retrocompativel (expand/contract). O CI nao impoe isso — e disciplina de
+  # revisao de PR.
+  #
+  # Gated a master + push: nunca roda em develop nem em PR. Fica inerte ate o
+  # secret PROD_DATABASE_URL existir; um push em master antes disso falha aqui
+  # de proposito (sem tocar producao alem do banco), em vez de deployar as cegas.
+  migrate-prod:
+
+    needs: [build, docker, migrations]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+
+    runs-on: ubuntu-latest
+
+    env:
+      # O banco de PRODUCAO (Supabase), via secret. Pooler em session mode (5432),
+      # coerente com o asyncpg — transaction mode (6543) quebraria prepared
+      # statements. Mesmo alvo que o DATABASE_URL do Render.
+      DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+      # Exigida pelo Settings() no import do env.py; uma migration nunca le JWKS,
+      # entao o valor e um placeholder literal — nao ha segredo aqui.
+      SUPABASE_JWKS_URL: https://exemplo.invalid/jwks
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # Só requirements.txt: o alembic vive nele, e nada aqui precisa do harness.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # `current` antes e depois cerca a transicao no log — util para diagnostico
+      # e para conferir, num deploy que falhe adiante, em que revision o banco
+      # ficou. Entre os dois, so `upgrade head`: forward-only, sem downgrade.
+      - name: Migrations em produção (upgrade head)
+        run: |
+          echo "Revision antes:"
+          alembic current
+          alembic upgrade head
+          echo "Revision depois:"
+          alembic current
+
+  # Dispara o deploy no Render, DEPOIS que as migrations de producao concluiram.
+  #
+  # needs: [migrate-prod] e uma dependencia explicita e nominal: torna
+  # estruturalmente impossivel deployar sem que o job de migrations em producao
+  # tenha tido sucesso. A semantica do Actions garante isso — job so roda se
+  # todos os `needs` tiverem sucesso, e como nao ha `if: always()`, essa exigencia
+  # permanece. O deploy herda build/docker/migrations transitivamente (via
+  # migrate-prod), sem um caminho paralelo que burle o gate, mesmo que o workflow
+  # seja reorganizado no futuro.
+  #
+  # Fire-and-forget: o Deploy Hook responde 200 na hora e NAO confirma que o
+  # deploy subiu saudavel. Essa validacao e o proximo commit (health check).
+  # autoDeploy segue false no render.yaml: quem orquestra o deploy e este
+  # pipeline, nunca o push observado direto pelo Render.
+  #
+  # Gated a master + push como defesa em profundidade; inerte ate o secret
+  # RENDER_DEPLOY_HOOK_URL existir (um POST para vazio falha o job).
+  deploy:
+
+    needs: [migrate-prod]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+
+    runs-on: ubuntu-latest
+
+    env:
+      # URL secreta gerada no painel do servico no Render. Vem por env (e nao na
+      # linha do curl) para nao vazar no log; o GitHub ainda a mascara.
+      DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+
+    steps:
+      # POST dispara o build+deploy no Render. -f faz o curl (e o job) falharem
+      # se o hook responder erro; -sS esconde o progresso mas mostra o erro.
+      - name: Disparar o Deploy Hook do Render
+        run: curl -fsS -X POST "$DEPLOY_HOOK"
+
+  # Valida que a aplicacao publicada respondeu saudavel, DEPOIS do deploy.
+  #
+  # needs: [deploy] — so roda se o disparo do deploy nao falhou. Como o hook e
+  # fire-and-forget e nao usamos a Render API, a UNICA fonte de sinal e o
+  # endpoint publico: nao ha status de deploy para consultar. A distincao
+  # "deploy em andamento" x "deploy falhou" e feita por TEMPO — enquanto o
+  # orcamento de espera nao esgota, erro de conexao / 5xx / 4xx sao tratados como
+  # "ainda construindo" e a sonda insiste; so apos o orcamento esgotar sem uma
+  # unica resposta saudavel o job declara falha. Isso evita falso negativo
+  # durante o build da imagem no Render Free.
+  #
+  # Limite conhecido: o Render mantem a versao anterior no ar durante o build,
+  # entao num deploy que nao seja o primeiro o /health pode responder 200 da
+  # instancia ANTIGA. Este job prova "a URL publica esta saudavel", nao "a nova
+  # imagem esta no ar" — fechar isso exigiria a Render API ou um marcador de
+  # versao, ambos fora do escopo atual.
+  #
+  # Gated a master + push; inerte ate a variavel PROD_BASE_URL existir.
+  health-check:
+
+    needs: [deploy]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+
+    runs-on: ubuntu-latest
+
+    # Teto rigido do job, acima do orcamento dos lacos (~11min). So age se algo
+    # travar (curl preso, runner lento); no caminho normal a mensagem de
+    # diagnostico dos proprios steps vale antes.
+    timeout-minutes: 15
+
+    env:
+      # URL publica do servico no Render. Nao e segredo — por isso variavel, e
+      # nao secret. Vazia (nao configurada) => o curl falha => job falha (inerte).
+      BASE_URL: ${{ vars.PROD_BASE_URL }}
+
+    steps:
+      # Fase 1 — liveness. Espera o /health responder 200, absorvendo o build da
+      # imagem + cold start do Render Free. 40 tentativas x 15s = ~10min de
+      # orcamento; cada curl tem --max-time 10 para nao pendurar.
+      - name: Aguardar liveness (/health)
+        run: |
+          for tentativa in $(seq 40); do
+            if curl -fsS --max-time 10 "$BASE_URL/health" >/dev/null; then
+              echo "Liveness OK na tentativa $tentativa."
+              exit 0
+            fi
+            echo "Tentativa $tentativa/40: deploy ainda em andamento; aguardando 15s..."
+            sleep 15
+          done
+          echo "Liveness nao respondeu em ~10min: deploy considerado falho."
+          exit 1
+
+      # Fase 2 — readiness. Com o processo vivo, o banco pode levar alguns
+      # segundos. Retry curto (6 x 10s = ~1min): se o /health/ready insistir em
+      # 503 depois disso, e problema real de conectividade, nao warm-up.
+      - name: Aguardar readiness (/health/ready)
+        run: |
+          for tentativa in $(seq 6); do
+            if curl -fsS --max-time 10 "$BASE_URL/health/ready" >/dev/null; then
+              echo "Readiness OK na tentativa $tentativa."
+              exit 0
+            fi
+            echo "Tentativa $tentativa/6: banco ainda nao pronto; aguardando 10s..."
+            sleep 10
+          done
+          echo "Readiness nao respondeu 200 em ~1min apos o liveness: banco inacessivel."
+          exit 1

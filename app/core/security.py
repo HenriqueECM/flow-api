@@ -69,4 +69,17 @@ def get_current_user(
             detail="Token sem identificação de usuário.",
         )
 
-    return CurrentUser(id=UUID(sub), email=payload.get("email"))
+    # `sub` chega como string (o PyJWT recusa outros tipos com InvalidSubjectError,
+    # tratado acima), mas nada garante que seja um UUID. O Supabase sempre emite
+    # um, e outro emissor — ou uma migração de provedor — não necessariamente.
+    # Sem este tratamento, o UUID() estoura fora do try e o request vira 500:
+    # token malformado deve ser recusado, não derrubar a rota.
+    try:
+        user_id = UUID(sub)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token com identificação de usuário inválida.",
+        )
+
+    return CurrentUser(id=user_id, email=payload.get("email"))

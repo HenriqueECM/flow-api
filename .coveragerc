@@ -1,0 +1,17 @@
+# Configuração do coverage. Não fica no pytest.ini: o coverage não lê aquele
+# arquivo, e até aqui o projeto rodava só com os defaults do `--cov=app` do CI.
+
+[run]
+# O SQLAlchemy async executa o ORM dentro de greenlets, e um `await db.execute()`
+# faz o greenlet filho voltar ao pai (via await_only) para esperar o IO. Sem
+# declarar `greenlet`, o coverage perde o rastro do frame do endpoint nessa
+# troca: tudo que vem DEPOIS do primeiro await que toca o banco fica marcado
+# como não coberto, mesmo executando.
+#
+# O efeito era subestimar justamente a camada async — routers e dependências —,
+# enquanto os motores síncronos em services/ sustentavam o número global. Um
+# endpoint novo sem teste quase não movia o ponteiro, e o gate não reclamava.
+#
+# `thread` acompanha porque é o default do coverage e o projeto depende dele:
+# o import de planilha roda o parser via run_in_threadpool.
+concurrency = greenlet, thread

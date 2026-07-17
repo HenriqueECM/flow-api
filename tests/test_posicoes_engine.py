@@ -61,7 +61,7 @@ def test_venda_parcial_e_recompra_nao_infla_pm():
         _tx("compra", 5, "46.814", date(2024, 1, 1)),
         _tx("compra", 10, "47.61", date(2024, 2, 1)),
         _tx("compra", 2, "44.72", date(2024, 3, 1)),
-        _tx("venda", 5, "50", date(2024, 4, 1)),   # PM não muda aqui
+        _tx("venda", 5, "50", date(2024, 4, 1)),  # PM não muda aqui
         _tx("compra", 3, "43", date(2024, 5, 1)),
     ]
     p = calcular_posicao_em_data(txs, FUTURO)

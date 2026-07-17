@@ -70,9 +70,15 @@ async def get_posicoes(
         nome = quote.get("shortName") or ticker
 
         if preco_raw is not None:
-            preco_atual = Decimal(str(preco_raw)).quantize(_CENTS, rounding=ROUND_HALF_UP)
-            valor_total = (quantidade * preco_atual).quantize(_CENTS, rounding=ROUND_HALF_UP)
-            lucro = (quantidade * (preco_atual - pm)).quantize(_CENTS, rounding=ROUND_HALF_UP)
+            preco_atual = Decimal(str(preco_raw)).quantize(
+                _CENTS, rounding=ROUND_HALF_UP
+            )
+            valor_total = (quantidade * preco_atual).quantize(
+                _CENTS, rounding=ROUND_HALF_UP
+            )
+            lucro = (quantidade * (preco_atual - pm)).quantize(
+                _CENTS, rounding=ROUND_HALF_UP
+            )
         else:
             preco_atual = valor_total = lucro = None
 

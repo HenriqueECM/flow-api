@@ -40,7 +40,9 @@ def test_eh_jcp_detecta_variantes(tipo, esperado):
 def test_liquidar_valor_recebido_jcp_retem_17_5_pct():
     # 100 bruto → 82,50 líquido (retém 17,5% de IRRF).
     assert liquidar_valor_recebido("JCP", Decimal("100")) == Decimal("82.50")
-    assert liquidar_valor_recebido("Juros sobre Capital Próprio", Decimal("200")) == Decimal("165.00")
+    assert liquidar_valor_recebido(
+        "Juros sobre Capital Próprio", Decimal("200")
+    ) == Decimal("165.00")
 
 
 def test_liquidar_valor_recebido_isentos_inalterados():

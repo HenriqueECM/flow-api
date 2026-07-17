@@ -45,9 +45,9 @@ MOV_BONIFICACAO = "Bonificação em Ativos"  # adiciona à posição (dilui o PM
 MOV_FRACAO = "Fração em Ativos"  # subtrai da posição (ajuste da fração)
 
 # Como cada linha deve ser tratada pelo motor de posição (_classificar_lote).
-TRAT_POSICAO = "posicao"    # entra no motor: compra soma, venda valida/subtrai
+TRAT_POSICAO = "posicao"  # entra no motor: compra soma, venda valida/subtrai
 TRAT_IGNORADO = "ignorado"  # mantém-se ignorada, não toca a posição
-TRAT_ERRO = "erro"          # erro fixo (ex.: ticker não parseável), não toca a posição
+TRAT_ERRO = "erro"  # erro fixo (ex.: ticker não parseável), não toca a posição
 
 
 @dataclass
@@ -124,9 +124,7 @@ def parse_dataframe(df: pd.DataFrame) -> tuple[list[ReviewRow], ReviewSummary]:
     df = df.rename(columns=lambda c: str(c).strip())
     faltando = [c for c in _COLUNAS_ESPERADAS if c not in df.columns]
     if faltando:
-        raise ValueError(
-            "Colunas ausentes na planilha: " + ", ".join(faltando)
-        )
+        raise ValueError("Colunas ausentes na planilha: " + ", ".join(faltando))
 
     # Extrai os campos brutos de cada linha preservando a ordem do arquivo.
     brutos = []
@@ -206,8 +204,12 @@ def _normalizar(reg: dict) -> RegistroNormalizado:
         # Bonificação adiciona (mapeada como Compra a custo 0, que dilui o PM);
         # fração subtrai (Venda, sem custo).
         if mov == MOV_BONIFICACAO:
-            return _reg(ativo=ticker, tipo="Compra", tratamento=TRAT_POSICAO, operacao="compra")
-        return _reg(ativo=ticker, tipo="Venda", tratamento=TRAT_POSICAO, operacao="venda")
+            return _reg(
+                ativo=ticker, tipo="Compra", tratamento=TRAT_POSICAO, operacao="compra"
+            )
+        return _reg(
+            ativo=ticker, tipo="Venda", tratamento=TRAT_POSICAO, operacao="venda"
+        )
 
     # Só "Transferência - Liquidação" é compra/venda; o resto é ignorado.
     if mov != MOV_LIQUIDACAO:
