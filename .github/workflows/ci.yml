@@ -385,7 +385,7 @@ jobs:
     env:
       # URL publica do servico no Render. Nao e segredo — por isso variavel, e
       # nao secret. Vazia (nao configurada) => o curl falha => job falha (inerte).
-      BASE_URL: ${{ vars.PROD_BASE_URL }}
+      BASE_URL: ${{ secrets.PROD_BASE_URL }}
 
     steps:
       # Fase 1 — liveness. Espera o /health responder 200, absorvendo o build da
