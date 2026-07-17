@@ -184,6 +184,72 @@ O arquivo foi removido: descrevia constraints que não existem (FK para
 migration `0001` já faz, e rodá-lo agora criaria índices duplicados. As garantias
 que ele prometia continuam ausentes do banco e estão registradas acima.
 
+## Deploy contínuo (CI/CD)
+
+O deploy é orquestrado pelo **GitHub Actions**, não pelo Render. O `render.yaml`
+mantém `autoDeploy: false` de propósito: quem decide a ordem é o pipeline. Um
+merge em `master` dispara a cadeia (todos os jobs de produção são *gated* a
+`master` + `push` — em PR e em `develop` eles não rodam):
+
+```
+PR/push  →  build  →  docker  →  migrations           (qualidade; rodam sempre)
+merge em master  →  migrate-prod  →  deploy  →  health-check   (só master + push)
+```
+
+- **build** — ruff, black, pytest com cobertura.
+- **docker** — constrói a imagem e faz smoke de `/health` e `/health/ready`.
+- **migrations** — aplica o ciclo `upgrade/downgrade/upgrade` num Postgres limpo;
+  prova que as migrations criam, desfazem e recriam o schema.
+- **migrate-prod** — roda `alembic upgrade head` contra o Supabase. **Forward-only:
+  nunca faz downgrade.** `needs: [build, docker, migrations]`.
+- **deploy** — dispara o Deploy Hook do Render. `needs: [migrate-prod]`, então é
+  estruturalmente impossível deployar sem as migrations terem passado.
+- **health-check** — faz poll de `/health` e `/health/ready` públicos, com
+  orçamento generoso para o build da imagem e o cold start do plano free.
+
+### Secrets e variáveis
+
+No **GitHub** (Settings → Secrets and variables → Actions):
+
+| Nome | Tipo | Para que serve |
+|---|---|---|
+| `PROD_DATABASE_URL` | secret | `alembic upgrade head` do `migrate-prod` contra o Supabase (pooler session mode, `postgresql+asyncpg://…`) |
+| `RENDER_DEPLOY_HOOK_URL` | secret | URL que o `deploy` chama por `POST` para disparar o Render |
+| `PROD_BASE_URL` | variável | URL pública do serviço, usada pelo `health-check`. Não é segredo |
+
+No **Render** (painel do serviço, `sync: false` no Blueprint): `DATABASE_URL`,
+`SUPABASE_JWKS_URL`, `SUPABASE_JWT_SECRET`, `BRAPI_TOKEN`, `CORS_ORIGINS`.
+`DEV_CREATE_TABLES` já vem fixado em `false`.
+
+Enquanto esses valores não existem, os jobs de produção ficam **inertes**: falham
+por valor vazio, sem tocar em nada. Não marque `migrate-prod`/`deploy`/
+`health-check` como *required checks* — eles são pulados em PR, e um check
+obrigatório que nunca roda em PR trava o merge.
+
+### Migrations retrocompatíveis (expand/contract)
+
+Como as migrations rodam **antes** do deploy, existe uma janela em que o **código
+antigo serve contra o schema já migrado**. Por isso toda migration precisa ser
+retrocompatível: adicionar coluna *nullable*, tabela ou constraint `NOT VALID` é
+seguro; remover/renomear coluna ou adicionar `NOT NULL` sem default quebra o
+código antigo nessa janela. Mudança destrutiva tem que ser fatiada em duas
+releases (primeiro o código para de usar, depois a migration remove). **O CI não
+detecta isso — é responsabilidade da revisão de PR.**
+
+### Rollback
+
+Não há reversão automática: uma falha de deploy após a migration **não** desfaz
+nada. A recuperação é manual e em duas frentes independentes:
+
+- **Código** — no painel do Render, *Manual Deploy* → selecionar o deploy
+  anterior (ou fazer *Rollback*). Como `autoDeploy` é `false`, isso é sempre uma
+  ação deliberada.
+- **Schema** — `alembic downgrade <revision>` a partir do container ou de uma
+  máquina autorizada, apontando `DATABASE_URL` para o Supabase. Graças ao
+  expand/contract, na maioria dos casos basta voltar o código e **deixar o schema
+  como está** — o código antigo tolera o schema novo. Só faça downgrade quando a
+  própria migration precisar ser revertida.
+
 ## Endpoints (v0.1)
 | Método | Rota                                        | Descrição                     |
 |--------|---------------------------------------------|-------------------------------|
