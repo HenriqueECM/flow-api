@@ -10,6 +10,7 @@ from app.core.observability import (
     init_observability,
     unhandled_exception_handler,
 )
+from app.core.version import VERSION
 from app.routers import (
     carteiras,
     health,
@@ -18,6 +19,7 @@ from app.routers import (
     proventos,
     relatorios,
     transacoes,
+    version,
 )
 
 
@@ -34,7 +36,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Flow API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Flow API", version=VERSION, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -52,6 +54,7 @@ app.add_middleware(RequestIdMiddleware)
 app.add_exception_handler(Exception, unhandled_exception_handler)
 
 app.include_router(health.router)
+app.include_router(version.router)
 app.include_router(carteiras.router)
 app.include_router(transacoes.router)
 app.include_router(proventos.router)
