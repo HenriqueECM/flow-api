@@ -5,9 +5,8 @@ durante um deploy no Render Free, `/health` pode responder 200 da instância
 ANTIGA (a plataforma mantém a versão anterior no ar enquanto builda a nova) —
 e que fechar essa lacuna exigiria "um marcador de versão". É este endpoint.
 
-`commit`/`branch` ainda são placeholders fixos aqui, de propósito: ligar
-RENDER_GIT_COMMIT/GITHUB_SHA (e fallbacks) é responsabilidade de um commit
-separado, para este ficar só sobre a existência da rota.
+`commit`/`branch` vêm de `app.core.version`, resolvidos a partir do ambiente
+(Render em produção, Actions na CI, "local" fora dos dois).
 
 Sem autenticação, como `/health`: rota operacional, não dado de usuário.
 `Cache-Control: no-store` porque um valor cacheado por proxy/CDN logo após um
@@ -19,7 +18,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Response
 
-from app.core.version import VERSION
+from app.core.version import BRANCH, COMMIT, VERSION
 
 router = APIRouter(tags=["version"])
 
@@ -34,7 +33,7 @@ async def version(response: Response) -> dict[str, str]:
     response.headers["Cache-Control"] = "no-store"
     return {
         "version": VERSION,
-        "commit": "local",
-        "branch": "local",
+        "commit": COMMIT,
+        "branch": BRANCH,
         "started_at": _STARTED_AT,
     }
