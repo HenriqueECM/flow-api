@@ -4,6 +4,12 @@ __pycache__/
 venv/
 .env
 .env.local
+
+# Credencial local: login.json guarda um access token (JWT) real do Supabase,
+# usado para testar endpoints autenticados. O repositório é público — versioná-lo
+# vazaria o token. Fica local, nunca no git.
+login.json
+
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/

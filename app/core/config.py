@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     # indisponíveis, mas a aplicação continua no ar).
     brapi_token: str | None = None
 
+    # Observabilidade.
+    log_level: str = "INFO"
+    # DSN do Sentry (opcional). Ausente hoje: a integração é um stub em
+    # observability.py, pronto para virar drop-in quando o SDK entrar.
+    sentry_dsn: str | None = None
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
