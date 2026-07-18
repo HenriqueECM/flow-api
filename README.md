@@ -250,6 +250,89 @@ nada. A recuperação é manual e em duas frentes independentes:
   como está** — o código antigo tolera o schema novo. Só faça downgrade quando a
   própria migration precisar ser revertida.
 
+## Observabilidade
+
+Logs estruturados em **JSON**, um por linha, para stdout — é o formato que o
+Render e um log drain (Better Stack/Logtail) indexam e tornam pesquisável.
+Texto solto não dá para filtrar por campo.
+
+Campos principais de cada linha:
+
+| Campo | Descrição |
+|---|---|
+| `level` | severidade (`INFO`, `ERROR`, ...) |
+| `logger` | nome do logger (`flow.access`, `flow.error`, ...) |
+| `message` | mensagem legível |
+| `request_id` | identificador da requisição, para correlacionar todas as linhas de um mesmo request |
+| `method` | verbo HTTP (nas linhas de access log e de erro) |
+| `path` | caminho da rota (idem) |
+| `status` | status code da resposta (access log) |
+| `duration_ms` | duração da requisição em milissegundos (access log) |
+
+Cada requisição recebe um `request_id`, propagado para todo log emitido durante
+o seu processamento — inclusive logs de módulos internos (`flow.brapi`,
+`flow.posicoes`). É esse campo que liga o log de erro à linha de access log da
+mesma requisição, mesmo com múltiplas requisições concorrentes intercaladas no
+stdout.
+
+Fluxo típico de investigação:
+
+```
+Usuário reporta erro
+        |
+        v
+Identificar request_id
+   (no X-Request-ID retornado ao front, ou no relato do usuário)
+        |
+        v
+Buscar logs no Render/log drain
+   filtrando por request_id
+        |
+        v
+Correlacionar endpoint e erro
+   (method + path do access log, exc do log de erro)
+```
+
+### `request_id`
+
+- **Header de entrada:** `X-Request-ID`. Se o chamador enviar um, ele é reaproveitado —
+  útil para correlacionar com um id gerado a montante (front, gateway).
+- **Header de saída:** toda resposta devolve `X-Request-ID`, com o valor usado
+  nesta requisição.
+- **Caso não exista:** a API gera um UUID automaticamente.
+
+Os health checks (`/health`, `/health/ready`) recebem `X-Request-ID` normalmente,
+mas não geram linha de access log — evita inundar os logs com o poll constante
+do Render.
+
+### Tratamento de erros
+
+Exceções não tratadas por qualquer rota caem no handler global e viram uma
+resposta padronizada:
+
+```json
+{
+  "detail": "Erro interno."
+}
+```
+
+O detalhe da exceção (mensagem, traceback) **não** é exposto ao cliente — fica
+só no log de erro (`flow.error`), junto com `request_id`, `method` e `path` da
+requisição que falhou.
+
+Já existe um ponto preparado para integração futura com o Sentry
+(`capture_exception` em `app/core/observability.py`): hoje é *no-op*, chamado a
+cada exceção não tratada; quando o SDK entrar como dependência, a captura liga
+ali, sem mexer no restante do fluxo.
+
+### Próximos passos de observabilidade
+
+- **Sentry** para alertas de exceção em tempo real (o ponto de integração já
+  existe, ver acima).
+- **Better Stack/log drain** para busca e análise dos logs em produção.
+- **Métricas de negócio** (ex.: carteiras criadas, transações registradas por
+  dia) além dos logs técnicos atuais.
+
 ## Endpoints (v0.1)
 | Método | Rota                                        | Descrição                     |
 |--------|---------------------------------------------|-------------------------------|
