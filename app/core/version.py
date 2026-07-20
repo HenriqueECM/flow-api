@@ -20,7 +20,7 @@ não provaria nada sobre o que está de fato rodando em produção.
 
 import os
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 
 
 def _resolve(*env_vars: str) -> str:
