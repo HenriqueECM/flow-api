@@ -7,6 +7,15 @@ e este projeto adere a [Versionamento Semântico](https://semver.org/lang/pt-BR/
 
 ## [Não lançado]
 
+## [0.1.2] - 2026-07-20
+
+### Corrigido
+
+- Cotações da brapi.dev passam a ser consultadas um ticker por requisição. O
+  plano atual limita a 1 ativo por requisição (`QUOTES_PER_REQUEST_EXCEEDED`),
+  o que fazia a chamada em lote falhar e `/posicoes` retornar 200 sem preço,
+  variação nem valor. A falha na cotação de um ticker não interrompe os demais.
+
 ## [0.1.1] - 2026-07-20
 
 ### Alterado
