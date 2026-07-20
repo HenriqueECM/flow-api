@@ -1,7 +1,8 @@
 """Camada de acesso às cotações da B3 via brapi.dev.
 
-Uma única chamada busca vários tickers (a brapi aceita lista separada por
-vírgula). Um cache em memória (TTL ~5 min por ticker) evita bater na API a
+Uma requisição por ticker: o plano da brapi limita a 1 ativo por requisição
+(`QUOTES_PER_REQUEST_EXCEEDED`), então as cotações são buscadas individualmente
+e agregadas em memória. Um cache (TTL ~5 min por ticker) evita bater na API a
 cada request do frontend. Falhas de rede não derrubam a aplicação — retornam
 o que houver em cache/vazio.
 """
@@ -28,33 +29,41 @@ async def _fetch_quotes(tickers: list[str]) -> dict[str, dict]:
     if not tickers:
         return {}
 
-    url = f"{BRAPI_BASE_URL}/quote/{','.join(tickers)}"
     headers: dict[str, str] = {}
     if settings.brapi_token:
         headers["Authorization"] = f"Bearer {settings.brapi_token}"
     else:
         logger.warning("BRAPI_TOKEN não configurado — cotações podem falhar.")
 
-    try:
-        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
-            response = await client.get(url, headers=headers)
-            response.raise_for_status()
-            payload = response.json()
-    except (httpx.HTTPError, ValueError) as exc:
-        # Rede/timeout/JSON inválido: não deixa a aplicação cair.
-        logger.warning("Falha ao consultar brapi.dev: %s: %s", type(exc).__name__, exc)
-        return {}
-
     quotes: dict[str, dict] = {}
-    for item in payload.get("results") or []:
-        symbol = item.get("symbol")
-        if not symbol:
-            continue
-        quotes[symbol.upper()] = {
-            "regularMarketPrice": item.get("regularMarketPrice"),
-            "regularMarketChangePercent": item.get("regularMarketChangePercent"),
-            "shortName": item.get("shortName"),
-        }
+    # Um ativo por requisição (limite do plano). Reusa um único cliente HTTP e
+    # isola cada ticker: a falha de um não impede os demais.
+    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
+        for ticker in tickers:
+            url = f"{BRAPI_BASE_URL}/quote/{ticker}"
+            try:
+                response = await client.get(url, headers=headers)
+                response.raise_for_status()
+                payload = response.json()
+            except (httpx.HTTPError, ValueError) as exc:
+                # Rede/timeout/JSON inválido: não deixa a aplicação cair nem
+                # interrompe os outros tickers.
+                logger.warning(
+                    "Falha ao consultar brapi.dev: %s: %s", type(exc).__name__, exc
+                )
+                continue
+
+            for item in payload.get("results") or []:
+                symbol = item.get("symbol")
+                if not symbol:
+                    continue
+                quotes[symbol.upper()] = {
+                    "regularMarketPrice": item.get("regularMarketPrice"),
+                    "regularMarketChangePercent": item.get(
+                        "regularMarketChangePercent"
+                    ),
+                    "shortName": item.get("shortName"),
+                }
     return quotes
 
 

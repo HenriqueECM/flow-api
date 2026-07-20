@@ -44,17 +44,21 @@ async def test_resposta_valida_indexa_por_ticker(bloquear_http_externo):
 
 
 async def test_normaliza_e_deduplica_os_tickers(bloquear_http_externo):
-    # Uma única chamada em lote, com os tickers em maiúsculas e sem repetição.
-    rota = bloquear_http_externo.get(url__regex=r".*/quote/PETR4,VALE3$").mock(
+    # Uma requisição por ticker (o plano da brapi limita a 1 ativo/requisição),
+    # com os tickers em maiúsculas e sem repetição.
+    petr4 = bloquear_http_externo.get(url__regex=r".*/quote/PETR4$").mock(
+        return_value=httpx.Response(200, json={"results": [_resultado()]})
+    )
+    vale3 = bloquear_http_externo.get(url__regex=r".*/quote/VALE3$").mock(
         return_value=httpx.Response(
-            200,
-            json={"results": [_resultado(), _resultado(symbol="VALE3", nome="Vale")]},
+            200, json={"results": [_resultado(symbol="VALE3", nome="Vale")]}
         )
     )
 
     quotes = await get_quotes([" petr4 ", "PETR4", "vale3", ""])
 
-    assert rota.call_count == 1
+    assert petr4.call_count == 1
+    assert vale3.call_count == 1
     assert set(quotes) == {"PETR4", "VALE3"}
 
 
