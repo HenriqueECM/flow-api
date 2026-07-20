@@ -42,7 +42,7 @@ requisição atendida.
 | `SUPABASE_JWKS_URL` | **sim** | — | chaves públicas que validam o JWT (ES256) |
 | `SUPABASE_JWT_SECRET` | não | vazio | fallback HS256, só para sessões legadas |
 | `JWT_AUDIENCE` | não | `authenticated` | `aud` esperado no token |
-| `CORS_ORIGINS` | não | `http://localhost:3000` | origens liberadas, separadas por vírgula |
+| `CORS_ORIGINS` | não | `http://localhost:3000` | origens liberadas, separadas por vírgula. Em produção, defina o domínio da Vercel aqui |
 | `BRAPI_TOKEN` | não | vazio | cotações da B3. Sem ele a app sobe; as cotações é que ficam nulas |
 | `DEV_CREATE_TABLES` | não | `false` | **deixe `false`.** Ver abaixo |
 | `PORT` | não | `8000` | porta do Uvicorn. Render/Railway/Fly injetam |
