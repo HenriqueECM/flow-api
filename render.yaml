@@ -68,9 +68,10 @@ services:
       - key: BRAPI_TOKEN
         sync: false
 
-      # Origem do frontend. Precisa ser definida: o default do código é
-      # `http://localhost:3000`, então sem isto a API em produção recusaria, por
-      # CORS, o site de produção.
+      # Origens do frontend, separadas por vírgula. Precisa ser definida: o
+      # default do código é só `http://localhost:3000`, então sem isto a API em
+      # produção recusaria, por CORS, o site da Vercel. Configure aqui o domínio
+      # de produção (ex.: http://localhost:3000,https://flow-web-gamma.vercel.app).
       - key: CORS_ORIGINS
         sync: false
 

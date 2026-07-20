@@ -7,6 +7,15 @@ e este projeto adere a [Versionamento Semântico](https://semver.org/lang/pt-BR/
 
 ## [Não lançado]
 
+## [0.1.1] - 2026-07-20
+
+### Alterado
+
+- Documentado o uso de `CORS_ORIGINS` para liberar o domínio de produção
+  (Vercel) via variável de ambiente no Render, preservando a configuração por
+  ambiente. O default do código permanece `http://localhost:3000`, sem hardcode
+  do domínio de produção.
+
 ## [0.1.0] - 2026-07-18
 
 Primeira versão oficial do backend Flow API.
