@@ -188,3 +188,41 @@ class RelatorioYocOut(BaseModel):
 
     ativos: list[YocAtivoOut]
     consolidado: YocConsolidadoOut
+
+
+# ── Relatório de Rentabilidade (carteira × benchmarks) ───────────────────────
+class MesRetornoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    mes: str  # "YYYY-MM"
+    # Retorno percentual do mês por série. None = sem dado (ex.: sem cotação).
+    carteira: float | None = None
+    cdi: float | None = None
+    ibov: float | None = None
+
+
+class AnoLinhaOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    ano: int
+    meses: list[float | None]  # 12 posições (Jan→Dez); None = mês sem dado
+    acum: float | None = None
+
+
+class CardsRentabilidadeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    total: float | None = None
+    doze_meses: float | None = None
+    mes: float | None = None
+    total_vs_cdi: float | None = None
+    doze_meses_vs_cdi: float | None = None
+    mes_vs_cdi: float | None = None
+
+
+class RelatorioRentabilidadeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    meses: list[MesRetornoOut]
+    tabela: list[AnoLinhaOut]
+    cards: CardsRentabilidadeOut
