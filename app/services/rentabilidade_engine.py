@@ -211,9 +211,15 @@ def calcular_rentabilidade(
 
     precos = {tk: _PrecoLookup(serie) for tk, serie in historico.items()}
 
-    def valor_carteira(chave_mes: str, as_of: date) -> Decimal | None:
-        """Valor de mercado da carteira no fim do mês. None se faltar preço de
-        algum ativo com posição aberta na data."""
+    def valor_carteira(chave_mes: str, as_of: date) -> Decimal:
+        """Valor de mercado da carteira no fim do mês (0 se não há posição).
+
+        Um ativo sem cotação histórica (a brapi não cobre alguns FIIs/BDRs, ou a
+        chamada falhou) é valorado pelo **preço médio** (custo) daquele mês, em
+        vez de anular o mês inteiro — assim um único ticker sem histórico não
+        zera a rentabilidade de toda a carteira. Mês sem carteira (nada em
+        posição) devolve 0, e o `denom <= 0` a jusante o trata como "sem retorno".
+        """
         total = Decimal(0)
         for tk, txs in por_ticker.items():
             pos = calcular_posicao_em_data(txs, as_of)
@@ -222,7 +228,9 @@ def calcular_rentabilidade(
             lookup = precos.get(tk)
             preco = lookup.preco(chave_mes) if lookup else None
             if preco is None:
-                return None  # sem preço → não dá para valorar o mês
+                # Fallback: valor de custo (PM). Sem variação de mercado captada,
+                # mas mantém o ativo na carteira e não contamina os demais.
+                preco = pos.pm_historico
             total += pos.quantidade * preco
         return total
 
@@ -237,17 +245,12 @@ def calcular_rentabilidade(
         f = fluxo_por_mes.get(chave, _FluxoMes())
         prov = proventos_por_mes.get(chave, Decimal(0))
 
-        if v_fim is None:
-            ret_carteira.append(None)
-            # Mantém v_ini anterior (melhor que zerar) para o próximo mês.
-            continue
-
         denom = v_ini + f.ponderado
         if denom > 0:
             ganho = v_fim - v_ini - f.liquido + prov
             ret_carteira.append(round(float(ganho / denom * Decimal(100)), 4))
         else:
-            # Sem base investida no mês (carteira vazia) → sem retorno.
+            # Sem base investida no mês (carteira vazia, sem aporte) → sem retorno.
             ret_carteira.append(None)
         v_ini = v_fim
 

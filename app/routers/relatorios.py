@@ -100,6 +100,7 @@ async def get_relatorio_yoc(
 async def get_relatorio_rentabilidade(
     carteira: Carteira = Depends(get_owned_carteira),
     db: AsyncSession = Depends(get_db),
+    tipo_ativo: str | None = None,
 ) -> RelatorioRentabilidadeOut:
     """Rentabilidade mensal da carteira (Modified Dietz) vs. benchmarks.
 
@@ -108,12 +109,21 @@ async def get_relatorio_rentabilidade(
     ao motor `calcular_rentabilidade`. Todas as fontes são tolerantes a falha:
     se uma cair, a série correspondente fica vazia e o relatório segue com o
     que houver (a carteira nunca depende de CDI/IBOV para ser calculada).
+
+    `tipo_ativo` (opcional) recorta a carteira a uma classe de ativo (ex.:
+    "Ações", "FII", "ETF"), casando de forma tolerante (case-insensitive,
+    substring) com o campo gravado nas transações.
     """
-    result = await db.execute(
+    query = (
         select(Transacao)
         .where(Transacao.carteira_id == carteira.id)
         .order_by(Transacao.data, Transacao.created_at)
     )
+    if tipo_ativo:
+        # Match tolerante: o campo é texto livre ("Ações", "FII", "ETF").
+        query = query.where(Transacao.tipo_ativo.ilike(f"%{tipo_ativo}%"))
+
+    result = await db.execute(query)
     transacoes = list(result.scalars().all())
 
     if not transacoes:
