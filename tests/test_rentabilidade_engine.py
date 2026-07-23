@@ -136,22 +136,40 @@ def test_provento_sem_data_ou_valor_e_ignorado():
     assert r.meses[0].carteira == 0.0
 
 
-def test_sem_nenhum_preco_carteira_fica_none():
+def test_sem_nenhum_preco_valora_pelo_pm():
     transacoes = [_tx("compra", 10, 10, date(2025, 1, 5))]
 
-    # historico vazio → não há como valorar a carteira.
+    # historico vazio → cada ativo é valorado pelo PM (custo). Comprou a 10 e
+    # "vale" 10 → 0% no mês, em vez de anular a carteira.
     r = calcular_rentabilidade(transacoes, [], {}, {}, {}, date(2025, 1, 20))
-    assert r.meses[0].carteira is None
-    assert r.cards.total is None
+    assert r.meses[0].carteira == 0.0
+    assert r.cards.total == 0.0
 
 
-def test_carry_forward_sem_preco_anterior_fica_none():
-    transacoes = [_tx("compra", 10, 10, date(2025, 1, 5))]
-    # Só há preço a partir de Março: Jan/Fev não têm preço anterior para herdar,
-    # então esses meses não podem ser valorados (carry-forward sem base).
-    historico = {"PETR4": {"2025-03": 12.0}}
+def test_ticker_sem_historico_nao_zera_a_carteira():
+    # PETR4 tem histórico (sobe 10→11); FIIX11 não tem — é valorado pelo PM.
+    # A rentabilidade da carteira ainda reflete o movimento do que tem cotação,
+    # em vez de virar None por causa do ticker sem histórico.
+    transacoes = [
+        _tx("compra", 100, 10, date(2025, 1, 2), ticker="PETR4"),
+        _tx("compra", 100, 20, date(2025, 1, 2), ticker="FIIX11"),
+    ]
+    historico = {"PETR4": {"2025-01": 10.0, "2025-02": 11.0}}
 
-    r = calcular_rentabilidade(transacoes, [], historico, {}, {}, date(2025, 3, 20))
+    r = calcular_rentabilidade(transacoes, [], historico, {}, {}, date(2025, 2, 15))
     meses = {m.mes: m.carteira for m in r.meses}
-    assert meses["2025-01"] is None
-    assert meses["2025-02"] is None
+    # Fev: PETR4 1000→1100 (+100); FIIX11 fica em 2000 (PM). Base 3000 → +3,33%.
+    assert meses["2025-02"] == 3.3333
+
+
+def test_preco_so_a_partir_de_mes_posterior_usa_pm_no_inicio():
+    # Comprou em Jan, mas o histórico do ticker só começa em Fev: Jan não tem
+    # preço anterior para herdar (carry-forward sem base) → valora pelo PM.
+    transacoes = [_tx("compra", 10, 10, date(2025, 1, 5))]
+    historico = {"PETR4": {"2025-02": 12.0}}
+
+    r = calcular_rentabilidade(transacoes, [], historico, {}, {}, date(2025, 2, 20))
+    meses = {m.mes: m.carteira for m in r.meses}
+    # Jan valorado ao PM (10) → 0%. Fev com cotação (12) → +20%.
+    assert meses["2025-01"] == 0.0
+    assert meses["2025-02"] == 20.0

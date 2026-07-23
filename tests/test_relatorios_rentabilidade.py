@@ -178,3 +178,24 @@ async def test_carteira_inexistente_responde_404(
     resp = await client.get(f"/carteiras/{uuid4()}/relatorios/rentabilidade")
 
     assert resp.status_code == 404, resp.text
+
+
+async def test_filtro_por_tipo_de_ativo_recorta_a_carteira(
+    client, usuario_autenticado, db_session, override_get_db, bloquear_http_externo
+):
+    carteira_id = await _carteira(db_session, usuario_autenticado.id)
+    # Uma única transação, classificada como "Ações".
+    tx = _tx_compra_mes_anterior(carteira_id)
+    tx.tipo_ativo = "Ações"
+    db_session.add(tx)
+    await db_session.commit()
+
+    # Filtrar por um tipo que não casa → nenhuma transação → relatório vazio.
+    # (Nenhuma fonte externa é consultada, então não há mocks a declarar.)
+    resp = await client.get(
+        f"/carteiras/{carteira_id}/relatorios/rentabilidade",
+        params={"tipo_ativo": "FII"},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["meses"] == []
