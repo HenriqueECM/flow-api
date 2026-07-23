@@ -83,7 +83,7 @@ def _exigir_banco_de_testes() -> None:
 # de explicar o problema. A ordem aqui é intencional — não reordene.
 _exigir_banco_de_testes()
 
-from app.core import brapi_client  # noqa: E402
+from app.core import bacen_client, brapi_client, indices_client  # noqa: E402
 from app.core.db import Base, get_db  # noqa: E402
 from app.core.security import CurrentUser, get_current_user  # noqa: E402
 from app.main import app  # noqa: E402
@@ -295,12 +295,21 @@ def bloquear_http_externo() -> Generator[respx.MockRouter, None, None]:
 
 @pytest.fixture(autouse=True)
 def limpar_cache_brapi() -> Generator[None, None, None]:
-    """Zera o cache de cotações (TTL de 5 min, global do processo).
+    """Zera os caches em memória das fontes externas (global do processo).
 
-    Sem isso, um teste que mocka a brapi deixa a cotação em memória e o teste
-    seguinte — inclusive o de "brapi fora do ar" — leria do cache e passaria
-    por engano. Limpa antes e depois para não depender da ordem de execução.
+    Sem isso, um teste que mocka uma fonte deixa o dado em memória e o teste
+    seguinte — inclusive o de "fonte fora do ar" — leria do cache e passaria
+    por engano. Cobre as quatro: cotação spot e histórico mensal da brapi, CDI
+    do BACEN e IBOV do Yahoo. Limpa antes e depois para não depender da ordem.
     """
-    brapi_client._quote_cache.clear()
+    caches = (
+        brapi_client._quote_cache,
+        brapi_client._history_cache,
+        bacen_client._cdi_cache,
+        indices_client._ibov_cache,
+    )
+    for cache in caches:
+        cache.clear()
     yield
-    brapi_client._quote_cache.clear()
+    for cache in caches:
+        cache.clear()

@@ -96,3 +96,62 @@ def test_mes_sem_preco_fica_sem_retorno():
     # Fev sem candle próprio → carry-forward do preço de Jan → 0% (sem variação).
     fev = next(m for m in r.meses if m.mes == "2025-02")
     assert fev.carteira == 0.0
+
+
+def test_venda_total_e_mes_seguinte_vazio_sem_retorno():
+    # Compra em Jan, vende tudo em Fev; Mar fica com a carteira zerada.
+    transacoes = [
+        _tx("compra", 100, 10, date(2025, 1, 10)),
+        _tx("venda", 100, 12, date(2025, 2, 15)),
+    ]
+    historico = {"PETR4": {"2025-01": 10.0, "2025-02": 12.0, "2025-03": 12.0}}
+
+    r = calcular_rentabilidade(transacoes, [], historico, {}, {}, date(2025, 3, 20))
+    meses = {m.mes: m.carteira for m in r.meses}
+    # Fev realizou o ganho da venda (base investida no mês → retorno definido).
+    assert meses["2025-02"] == 50.0
+    # Mar: carteira vazia (v_ini=0, sem fluxo) → sem base → None, não "0%".
+    assert meses["2025-03"] is None
+
+
+def test_provento_sem_data_ou_valor_e_ignorado():
+    transacoes = [_tx("compra", 10, 10, date(2025, 1, 5))]
+    historico = {"PETR4": {"2025-01": 10.0}}
+    proventos = [
+        _prov(5, None),  # sem data de referência
+        Provento(
+            ticker="PETR4",
+            tipo_provento="Dividendo",
+            data_com=date(2025, 1, 10),
+            data_pagamento=date(2025, 1, 10),
+            valor_por_acao=Decimal("0"),
+            valor_recebido=None,  # sem valor recebido
+        ),
+    ]
+
+    r = calcular_rentabilidade(
+        transacoes, proventos, historico, {}, {}, date(2025, 1, 20)
+    )
+    # Nenhum provento entra → Jan segue 0% (comprou e fechou a 10).
+    assert r.meses[0].carteira == 0.0
+
+
+def test_sem_nenhum_preco_carteira_fica_none():
+    transacoes = [_tx("compra", 10, 10, date(2025, 1, 5))]
+
+    # historico vazio → não há como valorar a carteira.
+    r = calcular_rentabilidade(transacoes, [], {}, {}, {}, date(2025, 1, 20))
+    assert r.meses[0].carteira is None
+    assert r.cards.total is None
+
+
+def test_carry_forward_sem_preco_anterior_fica_none():
+    transacoes = [_tx("compra", 10, 10, date(2025, 1, 5))]
+    # Só há preço a partir de Março: Jan/Fev não têm preço anterior para herdar,
+    # então esses meses não podem ser valorados (carry-forward sem base).
+    historico = {"PETR4": {"2025-03": 12.0}}
+
+    r = calcular_rentabilidade(transacoes, [], historico, {}, {}, date(2025, 3, 20))
+    meses = {m.mes: m.carteira for m in r.meses}
+    assert meses["2025-01"] is None
+    assert meses["2025-02"] is None
