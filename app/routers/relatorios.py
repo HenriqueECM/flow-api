@@ -6,12 +6,20 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.bacen_client import get_cdi_mensal
+from app.core.brapi_client import get_historico_mensal
 from app.core.db import get_db
+from app.core.indices_client import get_ibov_mensal
 from app.deps import get_owned_carteira
 from app.models import Carteira, Provento, Transacao
-from app.schemas import RelatorioYocOut
+from app.schemas import (
+    CardsRentabilidadeOut,
+    RelatorioRentabilidadeOut,
+    RelatorioYocOut,
+)
 from app.services.posicoes_engine import calcular_posicao_em_data
 from app.services.relatorios_engine import AtivoPosicao, calcular_relatorio_yoc
+from app.services.rentabilidade_engine import calcular_rentabilidade
 
 router = APIRouter(prefix="/carteiras/{carteira_id}/relatorios", tags=["relatorios"])
 
@@ -86,3 +94,52 @@ async def get_relatorio_yoc(
         data_fim=data_fim,
     )
     return RelatorioYocOut.model_validate(relatorio)
+
+
+@router.get("/rentabilidade", response_model=RelatorioRentabilidadeOut)
+async def get_relatorio_rentabilidade(
+    carteira: Carteira = Depends(get_owned_carteira),
+    db: AsyncSession = Depends(get_db),
+) -> RelatorioRentabilidadeOut:
+    """Rentabilidade mensal da carteira (Modified Dietz) vs. benchmarks.
+
+    Junta três fontes externas — histórico de preços dos ativos (brapi),
+    CDI mensal (BACEN/SGS) e IBOV mensal (Yahoo Finance) — e delega o cálculo
+    ao motor `calcular_rentabilidade`. Todas as fontes são tolerantes a falha:
+    se uma cair, a série correspondente fica vazia e o relatório segue com o
+    que houver (a carteira nunca depende de CDI/IBOV para ser calculada).
+    """
+    result = await db.execute(
+        select(Transacao)
+        .where(Transacao.carteira_id == carteira.id)
+        .order_by(Transacao.data, Transacao.created_at)
+    )
+    transacoes = list(result.scalars().all())
+
+    if not transacoes:
+        return RelatorioRentabilidadeOut(
+            meses=[], tabela=[], cards=CardsRentabilidadeOut()
+        )
+
+    result_prov = await db.execute(
+        select(Provento).where(Provento.carteira_id == carteira.id)
+    )
+    proventos = list(result_prov.scalars().all())
+
+    hoje = date.today()
+    primeira = min(tx.data for tx in transacoes)
+    # Profundidade em meses (define a faixa pedida às fontes de histórico).
+    meses_necessarios = (
+        (hoje.year - primeira.year) * 12 + (hoje.month - primeira.month) + 1
+    )
+
+    tickers = list({tx.ticker.upper() for tx in transacoes})
+
+    historico = await get_historico_mensal(tickers, meses_necessarios)
+    cdi = await get_cdi_mensal(primeira.replace(day=1))
+    ibov = await get_ibov_mensal(meses_necessarios)
+
+    relatorio = calcular_rentabilidade(
+        transacoes, proventos, historico, cdi, ibov, hoje
+    )
+    return RelatorioRentabilidadeOut.model_validate(relatorio)

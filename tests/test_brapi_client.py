@@ -10,10 +10,16 @@ Não tocam no banco. As respostas vêm do `respx` já montado por
 estourar.
 """
 
+import calendar
+
 import httpx
 import pytest
 
-from app.core.brapi_client import get_quotes
+from app.core.brapi_client import (
+    _range_para_meses,
+    get_historico_mensal,
+    get_quotes,
+)
 
 URL_PETR4 = "https://brapi.dev/api/quote/PETR4"
 
@@ -135,3 +141,103 @@ async def test_lista_vazia_nao_chama_a_api(bloquear_http_externo):
     # Qualquer requisição aqui estouraria: nenhuma rota foi declarada.
     assert await get_quotes([]) == {}
     assert await get_quotes(["", "  "]) == {}
+
+
+# ── Histórico mensal ─────────────────────────────────────────────────────────
+
+
+def _epoch(ano: int, mes: int) -> int:
+    """Epoch (UTC) do 1º dia do mês — como a brapi devolve no candle mensal."""
+    return calendar.timegm((ano, mes, 1, 0, 0, 0, 0, 0, 0))
+
+
+def _candles(pontos: dict[str, float]):
+    return {
+        "results": [
+            {
+                "symbol": "PETR4",
+                "historicalDataPrice": [
+                    {
+                        "date": _epoch(*map(int, ym.split("-"))),
+                        "close": close,
+                        "adjustedClose": close - 1,  # ignorado de propósito
+                    }
+                    for ym, close in pontos.items()
+                ],
+            }
+        ]
+    }
+
+
+async def test_historico_usa_close_indexado_por_mes(bloquear_http_externo):
+    bloquear_http_externo.get(url__regex=r".*/quote/PETR4.*").mock(
+        return_value=httpx.Response(
+            200, json=_candles({"2025-01": 30.0, "2025-02": 31.5})
+        )
+    )
+
+    hist = await get_historico_mensal(["PETR4"], 12)
+
+    # Usa `close` (preço da época), não `adjustedClose`.
+    assert hist == {"PETR4": {"2025-01": 30.0, "2025-02": 31.5}}
+
+
+async def test_historico_candle_sem_close_e_ignorado(bloquear_http_externo):
+    payload = {
+        "results": [
+            {
+                "symbol": "PETR4",
+                "historicalDataPrice": [
+                    {"date": _epoch(2025, 1), "close": 30.0},
+                    {"date": _epoch(2025, 2)},  # sem close
+                    {"close": 31.5},  # sem date
+                ],
+            }
+        ]
+    }
+    bloquear_http_externo.get(url__regex=r".*/quote/PETR4.*").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+
+    assert await get_historico_mensal(["PETR4"], 12) == {"PETR4": {"2025-01": 30.0}}
+
+
+async def test_historico_erro_http_omite_o_ticker(bloquear_http_externo):
+    bloquear_http_externo.get(url__regex=r".*/quote/PETR4.*").mock(
+        return_value=httpx.Response(500)
+    )
+
+    # Falha não vira {ticker: {}}; o ticker some do retorno.
+    assert await get_historico_mensal(["PETR4"], 12) == {}
+
+
+async def test_historico_sem_resultados_omite_o_ticker(bloquear_http_externo):
+    bloquear_http_externo.get(url__regex=r".*/quote/PETR4.*").mock(
+        return_value=httpx.Response(200, json={"results": []})
+    )
+
+    assert await get_historico_mensal(["PETR4"], 12) == {}
+
+
+async def test_historico_cache_evita_segunda_chamada(bloquear_http_externo):
+    rota = bloquear_http_externo.get(url__regex=r".*/quote/PETR4.*").mock(
+        return_value=httpx.Response(200, json=_candles({"2025-01": 30.0}))
+    )
+
+    primeira = await get_historico_mensal(["PETR4"], 12)
+    segunda = await get_historico_mensal(["PETR4"], 12)
+
+    assert rota.call_count == 1
+    assert primeira == segunda
+
+
+async def test_historico_lista_vazia_nao_chama_a_api(bloquear_http_externo):
+    assert await get_historico_mensal([], 12) == {}
+
+
+def test_selecao_de_faixa_por_profundidade():
+    assert _range_para_meses(12) == "1y"
+    assert _range_para_meses(24) == "2y"
+    assert _range_para_meses(60) == "5y"
+    assert _range_para_meses(120) == "10y"
+    assert _range_para_meses(121) == "max"
