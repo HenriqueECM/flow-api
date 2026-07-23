@@ -124,9 +124,7 @@ def _range_para_meses(meses: int) -> str:
     return "max"
 
 
-async def _fetch_historico_mensal(
-    ticker: str, faixa: str
-) -> dict[str, float] | None:
+async def _fetch_historico_mensal(ticker: str, faixa: str) -> dict[str, float] | None:
     """Busca o histórico mensal de um ticker na brapi (um candle por mês).
 
     Retorna `{"YYYY-MM": close}` usando o preço de fechamento REAL do mês (campo

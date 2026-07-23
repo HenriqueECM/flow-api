@@ -31,7 +31,6 @@ from decimal import Decimal
 
 from app.services.posicoes_engine import calcular_posicao_em_data
 
-
 # ── Estruturas de saída ───────────────────────────────────────────────────────
 
 
@@ -80,7 +79,9 @@ def _chave_mes(ano: int, mes: int) -> str:
     return f"{ano}-{mes:02d}"
 
 
-def _meses_entre(inicio: tuple[int, int], fim: tuple[int, int]) -> list[tuple[int, int]]:
+def _meses_entre(
+    inicio: tuple[int, int], fim: tuple[int, int]
+) -> list[tuple[int, int]]:
     """Lista de (ano, mês) de `inicio` a `fim`, inclusive."""
     ano, mes = inicio
     ano_fim, mes_fim = fim
@@ -274,9 +275,7 @@ def calcular_rentabilidade(
 
     # Tabela mensal por ano (só a carteira).
     anos = sorted({a for a, _ in meses})
-    ret_por_chave = {
-        _chave_mes(a, m): rc for (a, m), rc in zip(meses, ret_carteira)
-    }
+    ret_por_chave = {_chave_mes(a, m): rc for (a, m), rc in zip(meses, ret_carteira)}
     tabela: list[AnoLinha] = []
     for ano in anos:
         linha = [ret_por_chave.get(_chave_mes(ano, m)) for m in range(1, 13)]

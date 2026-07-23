@@ -129,7 +129,9 @@ async def get_relatorio_rentabilidade(
     hoje = date.today()
     primeira = min(tx.data for tx in transacoes)
     # Profundidade em meses (define a faixa pedida às fontes de histórico).
-    meses_necessarios = (hoje.year - primeira.year) * 12 + (hoje.month - primeira.month) + 1
+    meses_necessarios = (
+        (hoje.year - primeira.year) * 12 + (hoje.month - primeira.month) + 1
+    )
 
     tickers = list({tx.ticker.upper() for tx in transacoes})
 

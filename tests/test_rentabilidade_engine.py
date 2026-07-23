@@ -74,9 +74,7 @@ def test_tabela_por_ano_e_acumulado():
     transacoes = [_tx("compra", 10, 100, date(2024, 11, 4))]
     historico = {"PETR4": {"2024-11": 100.0, "2024-12": 110.0, "2025-01": 121.0}}
 
-    r = calcular_rentabilidade(
-        transacoes, [], historico, {}, {}, date(2025, 1, 20)
-    )
+    r = calcular_rentabilidade(transacoes, [], historico, {}, {}, date(2025, 1, 20))
 
     anos = {linha.ano: linha for linha in r.tabela}
     assert set(anos) == {2024, 2025}
@@ -94,9 +92,7 @@ def test_mes_sem_preco_fica_sem_retorno():
     # o mês ficaria None. Aqui há Jan, então Fev valora por carry-forward.
     historico = {"PETR4": {"2025-01": 50.0}}
 
-    r = calcular_rentabilidade(
-        transacoes, [], historico, {}, {}, date(2025, 2, 10)
-    )
+    r = calcular_rentabilidade(transacoes, [], historico, {}, {}, date(2025, 2, 10))
     # Fev sem candle próprio → carry-forward do preço de Jan → 0% (sem variação).
     fev = next(m for m in r.meses if m.mes == "2025-02")
     assert fev.carteira == 0.0
